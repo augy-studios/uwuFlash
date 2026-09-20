@@ -1,42 +1,560 @@
-* {
-  padding: 0;
-  margin: 0;
-  box-sizing: border-box;
-  font-family: "Jua", sans-serif;
+/* uwuFlash app styles. The theme tokens live in css/theme.css and are the
+   only place a colour is defined; nothing below hardcodes a hex. */
 
-  /* Chrome and Opera */
+@import url("/css/theme.css");
+
+/* ---- update bar ---- */
+
+/* Top of the document, above everything the app draws, and quieter than the
+   app's own topbar. One bar at a time: the app has no offline bar, so there
+   is no precedence order to keep here yet. */
+.update-notice {
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface-strong));
+  border-bottom: 1px solid var(--surface-border);
+  color: var(--ink);
+  font-size: 0.875rem;
+}
+
+.update-notice-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 0.5rem 1rem;
+  /* Under the notch on a phone, where the bar is the topmost thing on screen. */
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+}
+
+.update-notice p { flex: 1 1 auto; min-width: 0; }
+.update-notice .btn { flex: none; }
+
+/* ---- buttons ---- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: 0.88rem;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.btn:hover { transform: translateY(-1px); }
+.btn svg { width: 17px; height: 17px; }
+
+.btn-primary {
+  background: var(--brand-fill);
+  color: var(--on-brand);
+}
+.btn-primary:hover { background: var(--brand-fill-strong); }
+
+.btn-quiet {
+  background: transparent;
+  color: var(--muted-strong);
+}
+.btn-quiet:hover { background: var(--surface); }
+
+/* ---- layout ---- */
+
+.app {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.topbar h1 {
+  flex: 1 1 auto;
+  font-size: 1.35rem;
+  color: var(--brand-ink);
+}
+
+.panel {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.panel-head h2 {
+  flex: 1 1 auto;
+  font-size: 0.95rem;
+  color: var(--brand-ink);
+}
+.panel-head .count {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.empty-note {
+  font-size: 0.85rem;
+  color: var(--muted);
+  padding: 6px 2px;
+}
+
+/* ---- the card canvas ----
+
+   This is the signboard, and it is the one surface in the app that does not
+   follow the page's 10% brand tint. The app's own rule, from the brief:
+   in light mode the background is the chosen colour and the text is near
+   black; in dark mode the background is near black and the text is the
+   chosen colour. The editor chrome around it stays on the ordinary theme
+   tokens, so the canvas reads as the thing being made rather than as part
+   of the tool.
+
+   --card-bg and --card-ink are defined only here and in the presenter, and
+   both are derived from --brand and the mode tokens, never hardcoded. */
+
+.card-frame {
+  --card-bg: var(--brand);
+  --card-ink: var(--on-brand);
+  container-type: size;
+  aspect-ratio: 16 / 10;
+  width: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--surface-border);
+  background: var(--card-bg);
+  color: var(--card-ink);
+}
+
+:root[data-mode="dark"] .card-frame {
+  --card-bg: var(--bg);
+  --card-ink: var(--brand);
+}
+
+.card-canvas {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3cqw;
+  padding: 4cqw;
+  overflow: hidden;
+}
+
+/* Image left or right puts the two slots side by side; the other two stack.
+   The slot order in the markup already encodes which is which, so the
+   layouts differ only in direction. */
+.card-canvas.layout-image-left,
+.card-canvas.layout-image-right { flex-direction: row; }
+.card-canvas.layout-image-center,
+.card-canvas.layout-image-between { flex-direction: column; }
+
+.card-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2cqh;
+  min-width: 0;
+  min-height: 0;
+}
+.card-canvas.layout-image-left > .card-slot,
+.card-canvas.layout-image-right > .card-slot { flex: 1 1 50%; height: 100%; }
+.card-canvas.layout-image-center > .card-slot,
+.card-canvas.layout-image-between > .card-slot { width: 100%; }
+
+.slot-image { flex: 1 1 auto; min-height: 0; }
+
+.card-text {
+  width: 100%;
+  line-height: 1.15;
+  word-break: break-word;
   user-select: none;
+}
+.card-text.align-left { text-align: left; }
+.card-text.align-center { text-align: center; }
+.card-text.align-right { text-align: right; }
 
-  /* Safari */
-  -webkit-user-select: none;
+/* Sized against the card, not the viewport, so the editor preview and the
+   fullscreen presenter render identically at different sizes. */
+.card-text.size-s { font-size: 5cqw; }
+.card-text.size-m { font-size: 8cqw; }
+.card-text.size-l { font-size: 12cqw; }
+.card-text.size-xl { font-size: 18cqw; }
 
-  /* Konqueror HTML */
-  -khtml-user-select: none;
+.card-text-empty {
+  opacity: 0.45;
+  font-style: italic;
+}
+.presenting .card-text-empty { display: none; }
 
-  /* Firefox */
-  -moz-user-select: none;
+.card-image {
+  max-width: 100%;
+  max-height: 100%;
+  width: 100%;
+  height: 100%;
+  border-radius: 2cqw;
+}
+.card-image.fit-contain { object-fit: contain; }
+.card-image.fit-cover { object-fit: cover; }
 
-  /* Internet Explorer/Edge */
-  -ms-user-select: none;
+.card-empty,
+.card-image-missing {
+  font-size: 4cqw;
+  opacity: 0.55;
 }
 
-:link {
-  color: #6f6;
+/* ---- layout picker ---- */
+
+.layout-picker {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.layout-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  border-radius: 14px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface);
+  color: var(--muted-strong);
+  font-size: 0.7rem;
+  text-align: center;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.layout-btn.active {
+  background: var(--brand-fill);
+  color: var(--on-brand);
 }
 
-:visited {
-  color: #66f;
+/* A diagram of where the picture sits, drawn with the box model rather than
+   an image, so it tracks the theme and costs no request. */
+.layout-thumb {
+  width: 38px;
+  height: 26px;
+  border-radius: 5px;
+  border: 1px solid currentColor;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+}
+.layout-thumb::before {
+  content: "";
+  background: currentColor;
+  border-radius: 2px;
+  opacity: 0.85;
+}
+.layout-thumb::after {
+  content: "";
+  background: currentColor;
+  border-radius: 2px;
+  opacity: 0.35;
+}
+.thumb-image-center { flex-direction: column; }
+.thumb-image-center::before { flex: 2; }
+.thumb-image-center::after { flex: 1; }
+.thumb-image-left { flex-direction: row; }
+.thumb-image-left::before { flex: 1; }
+.thumb-image-left::after { flex: 1; }
+.thumb-image-right { flex-direction: row-reverse; }
+.thumb-image-right::before { flex: 1; }
+.thumb-image-right::after { flex: 1; }
+.thumb-image-between { flex-direction: column; }
+.thumb-image-between::before { flex: 2; order: 2; }
+.thumb-image-between::after { flex: 1; }
+
+/* ---- layer list ---- */
+
+.layer-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.layer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 10px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid transparent;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.layer-row.selected {
+  background: var(--brand-fill);
+  border-color: color-mix(in srgb, var(--ink) 30%, transparent);
+}
+.layer-row.selected .layer-main { color: var(--on-brand); }
+.layer-row.layer-hidden .layer-main { opacity: 0.5; }
+
+.layer-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  text-align: left;
+  color: var(--ink);
+}
+.layer-icon { display: inline-flex; flex: none; }
+.layer-icon svg { width: 16px; height: 16px; }
+.layer-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-:root {
-  --brand: #99ff99;
-  --bg: #f7faf8;
-  --card: #ffffff;
-  --ink: #0f1721;
-  --muted: #667085;
-  --ring: rgba(153, 255, 153, 0.5);
-  --ok: #16a34a;
-  --warn: #ea580c;
-  --busy: #b91c1c;
+.layer-actions {
+  display: flex;
+  gap: 3px;
+  flex: none;
 }
 
+/* ---- inspector ---- */
+
+.inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.inspector textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: 0.95rem;
+  resize: vertical;
+}
+.inspector textarea::placeholder {
+  color: var(--muted-strong);
+  opacity: 1;
+}
+.inspector textarea:focus-visible {
+  outline: 2px solid var(--brand-ink);
+  outline-offset: 1px;
+}
+
+.seg {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+.seg-btn {
+  flex: 1 1 auto;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  color: var(--muted-strong);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.seg-btn.active {
+  background: var(--brand-fill);
+  color: var(--on-brand);
+}
+
+/* ---- card strip ---- */
+
+.card-strip {
+  list-style: none;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.card-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+.card-chip.active {
+  background: var(--brand-fill);
+  color: var(--on-brand);
+}
+.card-chip-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface-strong);
+  font-size: 0.7rem;
+  flex: none;
+}
+.card-chip-text {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---- presenter ---- */
+
+.present {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  --card-bg: var(--brand);
+  --card-ink: var(--on-brand);
+  container-type: size;
+  background: var(--card-bg);
+  color: var(--card-ink);
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.2s ease, visibility 0s linear 0s;
+}
+:root[data-mode="dark"] .present {
+  --card-bg: var(--bg);
+  --card-ink: var(--brand);
+}
+.present.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.18s ease, visibility 0s linear 0.18s;
+}
+
+body.presenting { overflow: hidden; }
+
+/* The two halves of the screen are the control. They are invisible and sit
+   under the card, so the card is what fills the screen and the gesture is
+   simply "tap the side you want to go". */
+.present-tap {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 33%;
+  z-index: 2;
+  background: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.present-tap.prev { left: 0; }
+.present-tap.next { right: 0; }
+
+.present-exit {
+  position: absolute;
+  z-index: 3;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--card-ink);
+  background: color-mix(in srgb, var(--card-ink) 10%, transparent);
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+.present-exit:hover { opacity: 1; }
+.present-exit svg { width: 20px; height: 20px; }
+
+.present-count {
+  position: absolute;
+  z-index: 3;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--card-ink);
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+#presentCanvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding: 5cqw;
+}
+
+/* ---- toast ---- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  transform: translate(-50%, 12px);
+  z-index: 70;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: var(--brand-fill-strong);
+  color: var(--on-brand);
+  border: 1px solid var(--surface-border);
+  box-shadow: var(--shadow);
+  font-size: 0.85rem;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0s linear 0.18s;
+}
+.toast.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0s;
+}
+
+/* ---- narrow screens ---- */
+
+@media (max-width: 480px) {
+  .app { padding: 10px; }
+  .layout-picker { grid-template-columns: repeat(2, 1fr); }
+  .card-chip-text { max-width: 90px; }
+  .update-notice-inner { flex-wrap: wrap; }
+  .update-notice p { flex: 1 0 100%; }
+}

@@ -310,3 +310,59 @@ body {
     right: -100%;
   }
 }
+/* ---- update bar ----
+
+   This page keeps its own fixed palette rather than the theme tokens, so the
+   bar is written against that palette instead. Same markup and same copy as
+   the app's bar in style.css; only the colours differ. */
+
+.update-notice {
+  position: relative;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+  color: #fff;
+  font-family: "Jua", sans-serif;
+  font-size: 0.875rem;
+}
+
+.update-notice-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 0.5rem 1rem;
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+}
+
+.update-notice p {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.update-notice .btn {
+  flex: none;
+  padding: 7px 13px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-family: "Jua", sans-serif;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.update-notice .btn-primary {
+  background: #6f6;
+  border-color: #6f6;
+  color: #000065;
+}
+
+.update-notice .btn-quiet { background: none; }
+
+@media (max-width: 480px) {
+  .update-notice-inner { flex-wrap: wrap; }
+  .update-notice p { flex: 1 0 100%; }
+}

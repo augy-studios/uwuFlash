@@ -1,7 +1,7 @@
 {
     "name": "uwuFlash by UwU Apps",
-    "short_name": "UwU uwuFlash",
-    "description": "A simple uwuFlash app; view live uwuFlash at a glance!",
+    "short_name": "uwuFlash",
+    "description": "Write text on screen, add a picture, and hold it up. Flashcards for high visibility signboards.",
     "icons": [{
             "src": "UFCS-192.png",
             "type": "image/png",

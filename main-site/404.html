@@ -2,7 +2,26 @@
 <html lang="en">
 
 <head>
-    <link rel="manifest" href="../manifest.json" />
+    <script>
+        // Runs before first paint. Keep in step with the copy in index.html
+        // and with APP_KEY in js/theme.js.
+        (function () {
+            var k = "uwuflash";
+            var m = localStorage.getItem(k + ".mode") || "light";
+
+            document.documentElement.setAttribute("data-mode-preference", m);
+            if (m === "time") {
+                var h = new Date().getHours();
+                m = h >= 9 && h < 18 ? "light" : "dark";
+            }
+
+            var c = localStorage.getItem(k + ".colorTheme") || "classic";
+            document.documentElement.setAttribute("data-mode", m);
+            document.documentElement.setAttribute("data-color-theme", c);
+        })();
+    </script>
+
+    <link rel="manifest" href="/manifest.json" />
 
     <meta charset="utf-8">
     <title>Page Not Found | UwU Apps</title>
@@ -65,10 +84,11 @@
         <div class="wave1"></div>
         <div class="wave2"></div>
     </div>
-    <script>
-        if (typeof navigator.serviceWorker !== 'undefined') {
-            navigator.serviceWorker.register('sw.js')
-        }
+    <!-- The same registration the app uses, so this page gets the update bar
+         too rather than silently registering a worker of its own. -->
+    <script type="module">
+        import { initUpdateBar } from "/js/update.js";
+        initUpdateBar();
     </script>
 </body>
 
