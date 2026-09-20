@@ -22,6 +22,21 @@ function groupLayers(card) {
 
   const imageSlot = { kind: "image", layers: images };
 
+  if (card.layout === "image-between") {
+    // The one layout that places the image itself: text is split down the
+    // middle and the image goes in the gap, wherever the layers sit in the
+    // array. The arrows still order the text within each half. With one
+    // text layer there is nothing to put underneath, which reads as
+    // image-center.
+    const texts = visible.filter((l) => l.type === "text");
+    const half = Math.ceil(texts.length / 2);
+    return [
+      { kind: "text", layers: texts.slice(0, half) },
+      imageSlot,
+      { kind: "text", layers: texts.slice(half) },
+    ];
+  }
+
   if (card.layout === "image-left" || card.layout === "image-right") {
     // Side by side, so there is no above or below to honour; the layer
     // order only decides the order of the text within its own column.
@@ -29,9 +44,10 @@ function groupLayers(card) {
     return card.layout === "image-left" ? [imageSlot, textSlot] : [textSlot, imageSlot];
   }
 
-  // Stacked. Split the text on the image's position in the array. Several
-  // images are drawn as one block at the first one's place, which is where
-  // the layer arrows put the group anyway.
+  // image-center. Split the text on the image's position in the array, so
+  // the layer arrows move the picture up and down the card. Several images
+  // are drawn as one block at the first one's place, which is where the
+  // arrows put the group anyway.
   const first = visible.indexOf(images[0]);
   const last = visible.indexOf(images[images.length - 1]);
 
