@@ -1,7 +1,7 @@
 {
     "name": "uwuFlash by UwU Apps",
     "short_name": "uwuFlash",
-    "description": "Write text on screen, add a picture, and hold it up. Flashcards for high visibility signboards.",
+    "description": "Write text on the screen, add a picture, and hold it up like your personal handheld signboard.",
     "icons": [{
             "src": "UFCS-192.png",
             "type": "image/png",
