@@ -4,13 +4,15 @@
    the last entry in the array draws on top, the way a layers panel in
    PowerPoint or Photoshop reads from the top down. The list in the UI is
    therefore rendered reversed; the array order is the drawing order and the
-   only order stored. */
+   only order stored.
+
+   That order is also what puts text above or below the image on a stacked
+   layout. The layout only chooses stacked or side by side. */
 
 export const LAYOUTS = [
   { id: "image-center", label: "Image centre" },
   { id: "image-left", label: "Image left of text" },
   { id: "image-right", label: "Image right of text" },
-  { id: "image-between", label: "Image between text" },
 ];
 
 export const DEFAULT_LAYOUT = "image-center";
@@ -51,13 +53,33 @@ export function makeDeck() {
 export function normaliseDeck(raw) {
   if (!raw || !Array.isArray(raw.cards) || raw.cards.length === 0) return makeDeck();
 
-  const cards = raw.cards.map((card) => ({
-    id: card?.id || id(),
-    layout: LAYOUTS.some((l) => l.id === card?.layout) ? card.layout : DEFAULT_LAYOUT,
-    layers: Array.isArray(card?.layers) ? card.layers.map(normaliseLayer).filter(Boolean) : [],
-  }));
+  const cards = raw.cards.map((card) => {
+    const layers = Array.isArray(card?.layers)
+      ? card.layers.map(normaliseLayer).filter(Boolean)
+      : [];
+
+    return {
+      id: card?.id || id(),
+      layout: LAYOUTS.some((l) => l.id === card?.layout) ? card.layout : DEFAULT_LAYOUT,
+      // "image-between" was a layout that split the text around the image.
+      // The stack does that now, so a card saved under it keeps its look by
+      // moving the image to where that split used to fall.
+      layers: card?.layout === "image-between" ? splitTextAroundImages(layers) : layers,
+    };
+  });
 
   return { version: 1, cards };
+}
+
+/* The old image-between rendering: half the text, then every image, then the
+   rest. Written into the layer order so it survives as an ordinary card. */
+function splitTextAroundImages(layers) {
+  const images = layers.filter((l) => l.type === "image");
+  if (images.length === 0) return layers;
+
+  const texts = layers.filter((l) => l.type === "text");
+  const half = Math.ceil(texts.length / 2);
+  return [...texts.slice(0, half), ...images, ...texts.slice(half)];
 }
 
 function normaliseLayer(layer) {

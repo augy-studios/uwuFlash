@@ -164,13 +164,12 @@
   overflow: hidden;
 }
 
-/* Image left or right puts the two slots side by side; the other two stack.
+/* Image left or right puts the two slots side by side; centre stacks them.
    The slot order in the markup already encodes which is which, so the
    layouts differ only in direction. */
 .card-canvas.layout-image-left,
 .card-canvas.layout-image-right { flex-direction: row; }
-.card-canvas.layout-image-center,
-.card-canvas.layout-image-between { flex-direction: column; }
+.card-canvas.layout-image-center { flex-direction: column; }
 
 .card-slot {
   display: flex;
@@ -183,8 +182,7 @@
 }
 .card-canvas.layout-image-left > .card-slot,
 .card-canvas.layout-image-right > .card-slot { flex: 1 1 50%; height: 100%; }
-.card-canvas.layout-image-center > .card-slot,
-.card-canvas.layout-image-between > .card-slot { width: 100%; }
+.card-canvas.layout-image-center > .card-slot { width: 100%; }
 
 .slot-image { flex: 1 1 auto; min-height: 0; }
 
@@ -231,7 +229,7 @@
 
 .layout-picker {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
 }
 .layout-btn {
@@ -285,9 +283,6 @@
 .thumb-image-right { flex-direction: row-reverse; }
 .thumb-image-right::before { flex: 1; }
 .thumb-image-right::after { flex: 1; }
-.thumb-image-between { flex-direction: column; }
-.thumb-image-between::before { flex: 2; order: 2; }
-.thumb-image-between::after { flex: 1; }
 
 /* ---- layer list ---- */
 
@@ -566,7 +561,6 @@ body.presenting { overflow: hidden; }
 
 @media (max-width: 480px) {
   .app { padding: 10px; }
-  .layout-picker { grid-template-columns: repeat(2, 1fr); }
   .card-chip-text { max-width: 90px; }
   .update-notice-inner { flex-wrap: wrap; }
   .update-notice p { flex: 1 0 100%; }

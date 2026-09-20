@@ -9,34 +9,37 @@ import { escapeHtml } from "./ui.js";
 
 const SIZE_CLASS = { s: "size-s", m: "size-m", l: "size-l", xl: "size-xl" };
 
-/* The layout decides how the layers are grouped into slots, not what is in
-   them. Text layers fill the text slots in order; image layers fill the
-   image slot in order. A card with no image renders as text alone whatever
-   its layout says, so switching layouts never blanks a card. */
+/* The layout decides whether the image sits beside the text or stacked with
+   it. Where in the stack is the layer order's business: text layers before
+   the image in the array draw above it, text layers after it draw below. A
+   card with no image renders as text alone whatever its layout says, so
+   switching layouts never blanks a card. */
 function groupLayers(card) {
   const visible = card.layers.filter((l) => !l.hidden);
-  const texts = visible.filter((l) => l.type === "text");
   const images = visible.filter((l) => l.type === "image");
 
-  if (card.layout === "image-between") {
-    // Text above, image, then the rest of the text below. With one text
-    // layer there is nothing to put underneath, which reads as image-center.
-    const half = Math.ceil(texts.length / 2);
-    return [
-      { kind: "text", layers: texts.slice(0, half) },
-      { kind: "image", layers: images },
-      { kind: "text", layers: texts.slice(half) },
-    ];
-  }
+  if (images.length === 0) return [{ kind: "text", layers: visible }];
 
-  const textSlot = { kind: "text", layers: texts };
   const imageSlot = { kind: "image", layers: images };
 
-  if (card.layout === "image-left") return [imageSlot, textSlot];
-  if (card.layout === "image-right") return [textSlot, imageSlot];
+  if (card.layout === "image-left" || card.layout === "image-right") {
+    // Side by side, so there is no above or below to honour; the layer
+    // order only decides the order of the text within its own column.
+    const textSlot = { kind: "text", layers: visible.filter((l) => l.type === "text") };
+    return card.layout === "image-left" ? [imageSlot, textSlot] : [textSlot, imageSlot];
+  }
 
-  // image-center: image first, text under it.
-  return [imageSlot, textSlot];
+  // Stacked. Split the text on the image's position in the array. Several
+  // images are drawn as one block at the first one's place, which is where
+  // the layer arrows put the group anyway.
+  const first = visible.indexOf(images[0]);
+  const last = visible.indexOf(images[images.length - 1]);
+
+  return [
+    { kind: "text", layers: visible.slice(0, first) },
+    imageSlot,
+    { kind: "text", layers: visible.slice(last + 1).filter((l) => l.type === "text") },
+  ];
 }
 
 function textLayerHtml(layer) {
