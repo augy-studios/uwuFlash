@@ -16,7 +16,7 @@
    update bar, which posts the message handled at the bottom of this file.
    See update-bar-spec.md at the repo root. */
 
-const VERSION = 2;
+const VERSION = 3;
 const CACHE = `uwuFlash-${VERSION}`;
 
 /* Everything the app needs to start with no network at all. The editor, the
@@ -37,6 +37,9 @@ const ASSETS = [
   "/js/store.js",
   "/js/deck.js",
   "/js/render.js",
+  // UFCS-192.png is the launcher icon and the topbar mark both. UFCS-main.png
+  // is the og:image, which only a crawler fetches, so it is deliberately not
+  // precached: 390KB on every install for an image nobody on the site sees.
   "/UFCS-192.png",
   "/UFCS-512.png",
   "/favicon.ico",

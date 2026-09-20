@@ -81,6 +81,19 @@
   color: var(--brand-ink);
 }
 
+/* The mark carries its own pale background rather than transparency, so it is
+   rounded to read as an app tile instead of a green square dropped into the
+   bar. The border keeps its edge defined in dark mode, where a pale tile would
+   otherwise float. */
+.topbar-logo {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 10px;
+  border: 1px solid var(--surface-border);
+  object-fit: cover;
+}
+
 .panel {
   padding: 14px;
   display: flex;
