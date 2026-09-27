@@ -10,7 +10,8 @@ an arrivals hall or a stage. Save as many screens as you like and flick
 between them with a thumb, the way you would with a stack of cue cards.
 
 Everything is kept on the device. There is no account, nothing is uploaded,
-and the whole app works with no connection at all.
+and everything except sharing to another screen works with no connection at
+all.
 
 ## What it does
 
@@ -33,6 +34,12 @@ presenting, because a signboard that dims after thirty seconds is not one.
 presenting, tap the left or right third of the screen to move between them, or
 swipe, or use the arrow keys. No menu to go back to.
 
+**Show it on another screen.** Share to a laptop, a tablet or a TV browser on
+the same wifi. The other screen waits until you press play, then shows the
+card you are presenting. **Mirror** puts the card on both screens; **Extend**
+puts it on the other screen and turns yours into a presenter view, with the
+next card underneath, like a projector.
+
 **Pick a colour.** Seven colours, and a light and dark mode that can follow
 the clock. The colour is the point rather than decoration: in light mode the
 card is your colour with near black text, and in dark mode it is near black
@@ -50,8 +57,25 @@ open full screen like an app.
 - **New card**, **Duplicate** and the arrows manage the stack.
 - The play button at the top right starts presenting. Escape, the exit button,
   or leaving fullscreen stops it.
+- The screen button beside it shares. Choose Mirror or Extend, press **Start
+  sharing**, and scan the QR code with the other device (or type the code into
+  **Be the other screen** on it). Then press play.
 
 Your deck is saved as you work and is still there next time you open it.
+
+### Sharing and your network
+
+Both devices need to be on the same wifi, or one sharing a hotspot that the
+other has joined. Guest, hotel, university and office wifi often blocks
+devices from reaching each other; the hotspot is the fix.
+
+Cards go straight from one device to the other over an encrypted connection.
+To find each other, the two devices briefly use a free public introduction
+service (PeerJS) and a public address lookup (STUN, from Google and
+Cloudflare). Those see the devices' IP addresses and the share code, never the
+cards. The other device also learns your public IP address. Only the card being
+presented, and pictures on the cards next to it, are sent; what you are
+editing stays on your device.
 
 ## For developers
 
@@ -67,6 +91,7 @@ across the uwuapps projects rather than written for this one:
 | `uwuapps-theme.md` | The theme system: seven brand colours, light and dark, and the time based mode. |
 | `uwuapps-retrofit-time-mode.md` | The procedure for adding time based mode to an app that already has the two button toggle. |
 | `update-bar-spec.md` | The update prompt bar and the service worker rules it depends on. |
+| `STUN-p2p-spec.md` | Peer-to-peer pairing for screen sharing: STUN only, no TURN relay, no backend. |
 
 When one of these conflicts with the code, the specification is right and the
 code is a bug.

@@ -77,8 +77,12 @@ function imageLayerHtml(layer, url) {
 
 /* Async because image blobs come out of IndexedDB. The caller awaits it
    before swapping the markup in, so a card never paints its text first and
-   its picture a frame later. */
-export async function renderCard(card, target, { presenting = false } = {}) {
+   its picture a frame later.
+
+   `resolveImage` is where an image id becomes a URL. The editor's own cards
+   come out of IndexedDB; a shared screen passes its own resolver, since its
+   pictures arrived over the connection and were never stored. */
+export async function renderCard(card, target, { presenting = false, resolveImage = imageUrl } = {}) {
   const slots = groupLayers(card);
 
   const urls = new Map();
@@ -87,7 +91,7 @@ export async function renderCard(card, target, { presenting = false } = {}) {
       .filter((s) => s.kind === "image")
       .flatMap((s) => s.layers)
       .map(async (layer) => {
-        urls.set(layer.id, await imageUrl(layer.imageId));
+        urls.set(layer.id, await resolveImage(layer.imageId));
       })
   );
 

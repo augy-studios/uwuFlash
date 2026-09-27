@@ -23,6 +23,8 @@ import {
   cardSummary,
 } from "./deck.js";
 import { renderCard } from "./render.js";
+import { initShare, isHosting, hostStatus, shareMode, shareNow } from "./share.js";
+import { initViewer } from "./viewer.js";
 
 /* ---- state ---- */
 
@@ -379,9 +381,50 @@ function reorderLayer(layerId, delta) {
 
 /* ---- presenting ---- */
 
+/* Sharing in extend mode turns the presenter into a presenter view: the
+   other screen has the card, so this one shows it smaller with the next card
+   beneath it. Mirror, or not sharing at all, is the plain full screen card. */
+function isPresenterView() {
+  return isHosting() && shareMode() === "extend";
+}
+
 async function showPresentCard() {
-  await renderCard(currentCard(), el.presentCanvas, { presenting: true });
+  const remote = isPresenterView();
+  el.present.classList.toggle("remote", remote);
   el.presentCount.textContent = `${cardIndex + 1} / ${deck.cards.length}`;
+
+  // Sent before drawing here, so the other screen is not kept waiting on
+  // this one's image reads.
+  shareNow();
+
+  if (!remote) {
+    await renderCard(currentCard(), el.presentCanvas, { presenting: true });
+    return;
+  }
+
+  el.remoteStatus.textContent =
+    hostStatus() === "connected" ? "On the other screen" : "Waiting for the other screen to join";
+
+  const next = deck.cards[cardIndex + 1];
+  if (!next) {
+    el.remoteNext.className = "card-canvas presenting";
+    el.remoteNext.innerHTML = '<div class="card-empty">End of the cards</div>';
+  }
+  await Promise.all([
+    renderCard(currentCard(), el.remoteNow, { presenting: true }),
+    next ? renderCard(next, el.remoteNext, { presenting: true }) : null,
+  ]);
+}
+
+/* What the other screen is told about. Nothing card shaped leaves this
+   device until play is pressed; `nearby` only says whose pictures are worth
+   sending ahead of time. */
+function shareFrame() {
+  return {
+    presenting,
+    card: currentCard(),
+    nearby: [deck.cards[cardIndex + 1], deck.cards[cardIndex - 1]],
+  };
 }
 
 function stepCard(delta) {
@@ -418,6 +461,8 @@ async function exitPresent() {
   presenting = false;
   el.present.classList.add("hidden");
   document.body.classList.remove("presenting");
+  // The other screen goes back to waiting at once, not on the next beat.
+  shareNow();
 
   try {
     await wakeLock?.release();
@@ -663,6 +708,9 @@ function boot() {
   el.present = document.getElementById("present");
   el.presentCanvas = document.getElementById("presentCanvas");
   el.presentCount = document.getElementById("presentCount");
+  el.remoteNow = document.getElementById("remoteNow");
+  el.remoteNext = document.getElementById("remoteNext");
+  el.remoteStatus = document.getElementById("remoteStatus");
 
   el.layoutPicker.innerHTML = LAYOUTS.map(
     (l) =>
@@ -679,6 +727,18 @@ function boot() {
   wireEditor();
   wirePresenter();
   renderAll();
+
+  // The viewer first: a QR code link that opens this page means "be the
+  // other screen", and that has to be settled before sharing resumes a host
+  // session from last time.
+  initViewer();
+  initShare({ getFrame: shareFrame });
+
+  // A guest joining or leaving, or the mode changing, redraws the presenter
+  // between its full screen card and the presenter view.
+  document.addEventListener("uwu:sharechange", () => {
+    if (presenting) showPresentCard();
+  });
 
   // A deck half written when the tab closes is worse than one written a
   // fraction early. pagehide fires where beforeunload does not, on iOS.

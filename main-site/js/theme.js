@@ -59,14 +59,22 @@ export function getStoredMode() {
   return resolveMode(getModePreference());
 }
 
-export function applyColorTheme(id) {
+/* Puts a colour on the document without remembering it. A shared screen
+   wears the sharing device's colour this way, and goes back to its own with
+   initTheme() when it stops. */
+export function showColorTheme(id) {
   const theme = COLOR_THEMES.find((t) => t.id === id) || COLOR_THEMES[0];
   document.documentElement.setAttribute("data-color-theme", theme.id);
   document.documentElement.style.setProperty("--brand", theme.hex);
   document.documentElement.style.setProperty("--brand-rgb", hexToRgb(theme.hex));
-  localStorage.setItem(STORAGE_KEY_COLOR, theme.id);
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute("content", theme.hex);
+  return theme;
+}
+
+export function applyColorTheme(id) {
+  const theme = showColorTheme(id);
+  localStorage.setItem(STORAGE_KEY_COLOR, theme.id);
   return theme;
 }
 

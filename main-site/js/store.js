@@ -43,6 +43,30 @@ export function saveDeck(deck) {
   }
 }
 
+/* ---- small settings ----
+
+   One string each, under the app's prefix: the share mode, the code a host
+   is using, the code a guest last joined. Storage that throws (private
+   modes, a full quota) reads as nothing stored, which every caller already
+   treats as a first visit. */
+
+export function readSetting(name) {
+  try {
+    return localStorage.getItem(`${APP_KEY}.${name}`);
+  } catch {
+    return null;
+  }
+}
+
+export function writeSetting(name, value) {
+  try {
+    if (value === null || value === undefined) localStorage.removeItem(`${APP_KEY}.${name}`);
+    else localStorage.setItem(`${APP_KEY}.${name}`, String(value));
+  } catch {
+    /* not remembered; the next visit starts fresh */
+  }
+}
+
 /* ---- images ---- */
 
 let dbPromise = null;

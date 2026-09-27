@@ -3,6 +3,10 @@
 
 @import url("/css/theme.css");
 
+/* The hidden attribute wins over any display a class sets, so a .btn or a
+   flex box can be hidden with it like anything else. */
+[hidden] { display: none !important; }
+
 /* ---- update bar ---- */
 
 /* Top of the document, above everything the app draws, and quieter than the
@@ -534,6 +538,217 @@ body.presenting { overflow: hidden; }
   inset: 0;
   z-index: 1;
   padding: 5cqw;
+}
+
+/* Presenter view, while sharing in extend mode. The other screen has the
+   card, so this one shows it framed and smaller, with the next card beneath
+   it, and the tap zones still sit over the whole of it. */
+.present-remote {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: max(60px, env(safe-area-inset-top)) 16px max(44px, env(safe-area-inset-bottom));
+}
+.present.remote .present-remote { display: flex; }
+.present.remote #presentCanvas { display: none; }
+
+.remote-label {
+  font-size: 0.85rem;
+  color: var(--card-ink);
+  opacity: 0.7;
+}
+
+.remote-frame {
+  container-type: size;
+  aspect-ratio: 16 / 10;
+  width: min(100%, calc(50vh * 1.6));
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--card-ink) 30%, transparent);
+}
+.remote-frame.remote-next {
+  width: min(60%, calc(22vh * 1.6));
+  opacity: 0.75;
+}
+
+/* ---- share sheet ---- */
+
+.icon-btn.live {
+  background: var(--brand-fill);
+  color: var(--on-brand);
+}
+
+.modal-note {
+  font-size: 0.85rem;
+  color: var(--muted-strong);
+}
+
+.share-idle,
+.share-live {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Centred, with its quiet zone, so a phone pointed at the middle of the
+   screen finds it without hunting. Dark on white in both modes and every
+   colour: a scanner needs the contrast, and some will not read a code whose
+   light and dark are the other way round. */
+.share-qr {
+  display: flex;
+  justify-content: center;
+}
+.share-qr .qr {
+  width: min(220px, 70vw);
+  height: auto;
+  border-radius: 10px;
+}
+.qr-light { fill: white; }
+.qr-dark { fill: black; }
+
+.share-code {
+  text-align: center;
+  font-size: 2.2rem;
+  letter-spacing: 0.12em;
+  color: var(--ink);
+  user-select: text;
+}
+
+.share-help,
+.share-status {
+  font-size: 0.85rem;
+  color: var(--muted-strong);
+  text-align: center;
+}
+.share-status { color: var(--ink); }
+
+.share-link {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+  word-break: break-all;
+  user-select: text;
+}
+
+.join-row {
+  display: flex;
+  gap: 8px;
+}
+.join-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.join-row input::placeholder {
+  color: var(--muted-strong);
+  letter-spacing: normal;
+  text-transform: none;
+  opacity: 1;
+}
+.join-row input:focus-visible {
+  outline: 2px solid var(--brand-ink);
+  outline-offset: 1px;
+}
+
+/* ---- the other screen ----
+
+   The guest's side of sharing. Painted like the presenter, card colours and
+   all, because once play is pressed that is exactly what it is. Above the
+   presenter and below the toast. */
+
+.viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  --card-bg: var(--brand);
+  --card-ink: var(--on-brand);
+  container-type: size;
+  background: var(--card-bg);
+  color: var(--card-ink);
+}
+:root[data-mode="dark"] .viewer {
+  --card-bg: var(--bg);
+  --card-ink: var(--brand);
+}
+.viewer.hidden { display: none; }
+
+body.viewing { overflow: hidden; }
+
+#viewerCanvas {
+  position: absolute;
+  inset: 0;
+  padding: 5cqw;
+}
+.viewer:not(.showing) #viewerCanvas { display: none; }
+
+.viewer-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+}
+.viewer.showing .viewer-panel { display: none; }
+.viewer-panel h2 { font-size: clamp(1.5rem, 4cqw, 2.6rem); }
+.viewer-panel p {
+  max-width: 34rem;
+  font-size: clamp(0.95rem, 2cqw, 1.25rem);
+  opacity: 0.8;
+}
+.viewer-panel .button-row { justify-content: center; }
+.viewer-panel .btn { color: var(--ink); }
+
+.viewer-controls {
+  position: absolute;
+  z-index: 3;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  display: flex;
+  gap: 8px;
+}
+.viewer-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--card-ink);
+  background: color-mix(in srgb, var(--card-ink) 10%, transparent);
+  opacity: 0.45;
+  transition: opacity 0.15s ease;
+}
+.viewer-btn:hover,
+.viewer-btn:focus-visible { opacity: 1; }
+.viewer-btn svg { width: 20px; height: 20px; }
+
+.viewer-badge {
+  position: absolute;
+  z-index: 3;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: var(--card-ink);
+  background: color-mix(in srgb, var(--card-ink) 12%, transparent);
 }
 
 /* ---- toast ---- */
