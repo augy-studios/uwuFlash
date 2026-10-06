@@ -713,6 +713,11 @@ body.viewing { overflow: hidden; }
 }
 .viewer-panel .button-row { justify-content: center; }
 .viewer-panel .btn { color: var(--ink); }
+/* Replace, armed: the next tap throws this device's own cards away. */
+.viewer-panel .btn-danger {
+  color: var(--error);
+  border-color: var(--error);
+}
 
 .viewer-controls {
   position: absolute;

@@ -175,6 +175,13 @@
                 <button class="btn" id="viewerRetry" type="button" hidden>
                     <span data-icon="refresh"></span>Try again
                 </button>
+                <!-- Only when the other device picked Send. -->
+                <button class="btn" id="viewerAdd" type="button" hidden>
+                    <span data-icon="plus"></span>Add to my cards
+                </button>
+                <button class="btn" id="viewerReplace" type="button" hidden>
+                    <span data-icon="cards"></span><span id="viewerReplaceLabel">Replace my cards</span>
+                </button>
                 <button class="btn btn-quiet" id="viewerLeave" type="button">Leave</button>
             </div>
         </div>
@@ -197,12 +204,13 @@
                     <span data-icon="close"></span>
                 </button>
             </div>
-            <p class="modal-note">Show your cards on another screen on the same wifi. It waits until you press play, then shows the card you are presenting.</p>
+            <p class="modal-note">Show your cards on another device on the same wifi, or send it a copy of them.</p>
 
-            <p class="modal-section-label">How the other screen is used</p>
+            <p class="modal-section-label">What the other device does</p>
             <div class="seg" id="shareMode">
                 <button class="seg-btn" type="button" data-share-mode="mirror" aria-pressed="false">Mirror</button>
                 <button class="seg-btn" type="button" data-share-mode="extend" aria-pressed="false">Extend</button>
+                <button class="seg-btn" type="button" data-share-mode="send" aria-pressed="false">Send cards</button>
             </div>
             <p class="mode-note" id="shareModeNote"></p>
 
@@ -229,7 +237,7 @@
                 </div>
             </div>
 
-            <p class="modal-section-label">Be the other screen</p>
+            <p class="modal-section-label">Be the other device</p>
             <form class="join-row" id="joinForm">
                 <input id="joinCode" type="text" inputmode="text" autocomplete="off" autocapitalize="characters"
                     spellcheck="false" maxlength="12" placeholder="Code" aria-label="Code from the sharing device">

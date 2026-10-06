@@ -16,7 +16,7 @@
    update bar, which posts the message handled at the bottom of this file.
    See update-bar-spec.md at the repo root. */
 
-const VERSION = 6;
+const VERSION = 7;
 const CACHE = `uwuFlash-${VERSION}`;
 
 /* Everything the app needs to start with no network at all. The editor, the

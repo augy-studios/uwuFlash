@@ -12,7 +12,12 @@ const PEERJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.m
 const PEER_PREFIX = "uwuflash-";
 const CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXYZ23456789";
 export const CODE_LENGTH = 6;
-export const PROTOCOL_VERSION = 1;
+// 2 added sending the deck. A guest on 1 would sit on "Ready" forever when
+// the host picked Send, so the two are told to reload instead.
+export const PROTOCOL_VERSION = 2;
+// The most pictures either side keeps track of for the other: the guest's
+// `have` list, and the pictures a sent deck may bring.
+export const MAX_SHARED_IMAGES = 200;
 const CONNECT_TIMEOUT_MS = 15000;
 
 // STUN only. Supplying `config` replaces PeerJS's default, which includes a

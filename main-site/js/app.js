@@ -18,12 +18,13 @@ import {
   makeTextLayer,
   makeImageLayer,
   normaliseDeck,
+  freshCards,
   referencedImageIds,
   move,
   cardSummary,
 } from "./deck.js";
 import { renderCard } from "./render.js";
-import { initShare, isHosting, hostStatus, shareMode, shareNow } from "./share.js";
+import { initShare, isHosting, hostStatus, shareMode, shareNow, shareDeckChanged } from "./share.js";
 import { initViewer } from "./viewer.js";
 
 /* ---- state ---- */
@@ -63,6 +64,9 @@ function flush() {
   if (!saveDeck(deck)) {
     toast("Could not save. Storage may be full.");
   }
+  // A device copying this deck gets every saved edit. Nothing unless Send
+  // is picked and somebody has joined.
+  shareDeckChanged();
 }
 
 /* ---- rendering ---- */
@@ -318,6 +322,10 @@ function addTextLayer() {
   el.inspector.querySelector("#layerText")?.focus();
 }
 
+function newImageId() {
+  return `img-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 async function addImageLayer(file, replaceLayerId = null) {
   if (!file) return;
 
@@ -326,7 +334,7 @@ async function addImageLayer(file, replaceLayerId = null) {
     return;
   }
 
-  const imageId = `img-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const imageId = newImageId();
 
   try {
     await putImage(imageId, file);
@@ -367,6 +375,54 @@ async function removeLayer(layerId) {
   renderAll();
   flush();
   await pruneImages(referencedImageIds(deck));
+}
+
+/* Cards sent from another device, added after this deck's own or replacing
+   them. Every picture is stored under a new id of this device's making, so
+   one sent with the id of a picture already here cannot overwrite it. A
+   layer whose picture never came, or could not be stored, is left out. */
+async function importCards(cards, pictures, { replace }) {
+  const renamed = new Map();
+  let unstored = 0;
+  for (const [sentId, blob] of pictures) {
+    const imageId = newImageId();
+    try {
+      await putImage(imageId, blob);
+      renamed.set(sentId, imageId);
+    } catch {
+      unstored++;
+    }
+  }
+
+  const incoming = freshCards(
+    cards.map((card) => ({
+      ...card,
+      layers: card.layers
+        .filter((layer) => layer.type !== "image" || renamed.has(layer.imageId))
+        .map((layer) => (layer.type === "image" ? { ...layer, imageId: renamed.get(layer.imageId) } : layer)),
+    }))
+  );
+  if (incoming.length === 0) return;
+
+  // A deck that is still the one blank card a first visit starts with has
+  // nothing to keep, so adding to it replaces it.
+  const blank =
+    deck.cards.length === 1 && deck.cards[0].layers.every((l) => l.type === "text" && !l.text.trim());
+
+  if (replace || blank) {
+    deck.cards = incoming;
+    selectCard(0);
+  } else {
+    deck.cards.push(...incoming);
+    selectCard(deck.cards.length - incoming.length);
+  }
+
+  flush();
+  await pruneImages(referencedImageIds(deck));
+
+  const verb = replace ? "Replaced your cards with" : "Added";
+  const count = `${incoming.length} card${incoming.length === 1 ? "" : "s"}`;
+  toast(unstored ? `${verb} ${count}. ${unstored} picture${unstored === 1 ? "" : "s"} could not be stored.` : `${verb} ${count}.`);
 }
 
 function reorderLayer(layerId, delta) {
@@ -417,13 +473,14 @@ async function showPresentCard() {
 }
 
 /* What the other screen is told about. Nothing card shaped leaves this
-   device until play is pressed; `nearby` only says whose pictures are worth
-   sending ahead of time. */
+   device until play is pressed, unless Send is picked; `nearby` only says
+   whose pictures are worth sending ahead of time. */
 function shareFrame() {
   return {
     presenting,
     card: currentCard(),
     nearby: [deck.cards[cardIndex + 1], deck.cards[cardIndex - 1]],
+    deck,
   };
 }
 
@@ -731,7 +788,7 @@ function boot() {
   // The viewer first: a QR code link that opens this page means "be the
   // other screen", and that has to be settled before sharing resumes a host
   // session from last time.
-  initViewer();
+  initViewer({ importCards });
   initShare({ getFrame: shareFrame });
 
   // A guest joining or leaving, or the mode changing, redraws the presenter

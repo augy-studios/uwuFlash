@@ -40,6 +40,10 @@ card you are presenting. **Mirror** puts the card on both screens; **Extend**
 puts it on the other screen and turns yours into a presenter view, with the
 next card underneath, like a projector.
 
+**Send your cards to another device.** The same sharing, with **Send cards**
+picked instead, copies your whole deck, pictures included, to the other
+device. It can add them to its own cards or replace its own with them.
+
 **Pick a colour.** Seven colours, and a light and dark mode that can follow
 the clock. The colour is the point rather than decoration: in light mode the
 card is your colour with near black text, and in dark mode it is near black
@@ -59,7 +63,10 @@ open full screen like an app.
   or leaving fullscreen stops it.
 - The screen button beside it shares. Choose Mirror or Extend, press **Start
   sharing**, and scan the QR code with the other device (or type the code into
-  **Be the other screen** on it). Then press play.
+  **Be the other device** on it). Then press play.
+- To copy your cards to another device, choose **Send cards** instead and join
+  the same way. Once the pictures have arrived, the other device picks **Add
+  to my cards** or **Replace my cards** (which needs a second tap).
 
 Your deck is saved as you work and is still there next time you open it.
 
@@ -75,7 +82,8 @@ service (PeerJS) and a public address lookup (STUN, from Google and
 Cloudflare). Those see the devices' IP addresses and the share code, never the
 cards. The other device also learns your public IP address. Only the card being
 presented, and pictures on the cards next to it, are sent; what you are
-editing stays on your device.
+editing stays on your device. The exception is **Send cards**, which sends the
+whole deck, hidden layers included, because that is what it is for.
 
 ## For developers
 

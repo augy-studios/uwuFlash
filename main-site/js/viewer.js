@@ -8,11 +8,16 @@
    or its saved theme: pictures are held in memory only, and the colours go
    back to this device's own when it leaves.
 
+   The one exception is a host that picked Send. Then nothing is shown, and
+   the host's whole deck arrives instead, pictures and all, with a choice to
+   add it to this device's cards or replace them. Even then the deck is only
+   held here until one of those is pressed; app.js does the writing.
+
    Everything that arrives is input from another device, so it is checked
    field by field before it is used, and nothing received goes near
    innerHTML except through the card renderer, which escapes text. */
 
-import { Guest, normaliseCode, isValidCode } from "./p2p.js";
+import { Guest, normaliseCode, isValidCode, MAX_SHARED_IMAGES } from "./p2p.js";
 import { renderCard } from "./render.js";
 import { LAYOUTS, DEFAULT_LAYOUT, TEXT_SIZES } from "./deck.js";
 import { COLOR_THEMES, initTheme, showColorTheme } from "./theme.js";
@@ -34,6 +39,10 @@ const MAX_CHUNKS = 1000;
 const MAX_CHUNK_CHARS = 16000;
 const MAX_LAYERS = 40;
 const MAX_TEXT = 2000;
+const MAX_DECK_CARDS = 500;
+// Replace throws away this device's own cards, so it takes a second tap
+// within this long.
+const ARM_MS = 4000;
 const IMAGE_ID = /^img-[a-z0-9-]{1,40}$/;
 const IMAGE_TYPES = new Set([
   "image/png", "image/jpeg", "image/webp", "image/gif", "image/avif", "image/bmp", "image/svg+xml",
@@ -71,6 +80,15 @@ const incoming = new Map(); // image id -> { mime, total, parts, count }
 let shownKey = "";
 let waitKey = "";
 let waitSince = 0;
+
+// A deck the host is sending: { cards, imageIds, blobs: id -> Blob,
+// missing: ids the host could not read }. Its pictures are kept apart from
+// `images`, which evicts, so a deck with many pictures arrives whole.
+let offer = null;
+let copying = false;
+let replaceArmed = false;
+let armTimer = null;
+let onImport = async () => {};
 
 /* ---- joining ---- */
 
@@ -175,17 +193,29 @@ function onMessage(message) {
     case "state":
       state = readState(message);
       lastStateAt = Date.now();
+      // The host went back to showing cards. Its deck is no longer on offer.
+      if (state.mode !== "send" && offer) dropOffer();
       wearTheme(state.theme);
       apply();
       break;
+    case "deck":
+      offer = readOffer(message, offer);
+      disarmReplace();
+      // A fresh copy may want pictures the last one did not.
+      sendHave();
+      break;
     case "image":
       receiveImage(message);
+      break;
+    case "noimage":
+      if (typeof message.id === "string" && offer?.imageIds.has(message.id)) offer.missing.add(message.id);
       break;
     case "end":
       // The host stopped on purpose. Its code is gone, so there is nothing
       // to come back to.
       ended = true;
       state = null;
+      dropOffer();
       clearTimeout(retryTimer);
       resuming = false;
       hangUp();
@@ -202,8 +232,16 @@ function onMessage(message) {
   renderPanel();
 }
 
+// While a deck is on offer, the pictures it needs are the only ones that
+// count; the host is not showing anything.
 function sendHave() {
-  guest?.send({ type: "have", images: [...images.keys()] });
+  const held = offer ? offer.blobs.keys() : images.keys();
+  guest?.send({ type: "have", images: [...held] });
+}
+
+function dropOffer() {
+  offer = null;
+  disarmReplace();
 }
 
 /* ---- checking what arrives ---- */
@@ -213,11 +251,48 @@ function readState(message) {
     color: COLOR_THEMES.some((t) => t.id === message.theme?.color) ? message.theme.color : COLOR_THEMES[0].id,
     mode: message.theme?.mode === "dark" ? "dark" : "light",
   };
-  const card = message.presenting === true ? readCard(message.card) : null;
-  return { presenting: card !== null, card, theme };
+  const mode = message.mode === "send" ? "send" : "show";
+  const card = mode === "show" && message.presenting === true ? readCard(message.card) : null;
+  return { mode, presenting: card !== null, card, theme };
+}
+
+/* A sent deck. Cards that do not read are dropped, and so are image layers
+   past the picture limit, so what is offered is exactly what can arrive.
+   Pictures already received for an earlier copy are kept. */
+function readOffer(message, previous) {
+  if (!Array.isArray(message.cards)) return null;
+
+  const imageIds = new Set();
+  const cards = message.cards
+    .slice(0, MAX_DECK_CARDS)
+    .map(readCard)
+    .filter(Boolean)
+    .map((card) => ({
+      ...card,
+      layers: card.layers.filter((layer) => {
+        if (layer.type !== "image" || imageIds.has(layer.imageId)) return true;
+        if (imageIds.size >= MAX_SHARED_IMAGES) return false;
+        imageIds.add(layer.imageId);
+        return true;
+      }),
+    }));
+  if (cards.length === 0) return null;
+
+  const keep = ([id]) => imageIds.has(id);
+  return {
+    cards,
+    imageIds,
+    blobs: new Map([...(previous?.blobs ?? [])].filter(keep)),
+    missing: new Set([...(previous?.missing ?? [])].filter((id) => imageIds.has(id))),
+  };
+}
+
+function picturesPending() {
+  return offer ? offer.imageIds.size - offer.blobs.size - offer.missing.size : 0;
 }
 
 // Layer ids are made here, by position, rather than taken from the wire.
+// A shown card never carries hidden layers; a sent deck flags them.
 function readCard(card) {
   if (!card || typeof card !== "object" || !Array.isArray(card.layers)) return null;
 
@@ -231,7 +306,7 @@ function readCard(card) {
           type: "image",
           imageId: layer.imageId,
           fit: layer.fit === "cover" ? "cover" : "contain",
-          hidden: false,
+          hidden: layer.hidden === true,
         };
       }
       if (layer?.type === "text") {
@@ -241,7 +316,7 @@ function readCard(card) {
           text: typeof layer.text === "string" ? layer.text.slice(0, MAX_TEXT) : "",
           size: TEXT_SIZES.some((s) => s.id === layer.size) ? layer.size : "l",
           align: ["left", "center", "right"].includes(layer.align) ? layer.align : "center",
-          hidden: false,
+          hidden: layer.hidden === true,
         };
       }
       return null;
@@ -264,7 +339,7 @@ function receiveImage(m) {
   ) {
     return;
   }
-  if (images.has(m.id)) return;
+  if (offer?.imageIds.has(m.id) ? offer.blobs.has(m.id) : images.has(m.id)) return;
 
   let entry = incoming.get(m.id);
   if (!entry || entry.total !== m.total || entry.mime !== m.mime) {
@@ -282,17 +357,26 @@ function receiveImage(m) {
   if (entry.count < entry.total) return;
 
   incoming.delete(m.id);
-  let url;
+  let blob;
   try {
     const binary = atob(entry.parts.join(""));
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    url = URL.createObjectURL(new Blob([bytes], { type: entry.mime }));
+    blob = new Blob([bytes], { type: entry.mime });
   } catch {
     return;
   }
 
-  images.set(m.id, url);
+  // Asked again here, not at the first chunk: the deck may have been sent
+  // afresh while this picture was on its way.
+  if (offer?.imageIds.has(m.id)) {
+    offer.blobs.set(m.id, blob);
+    offer.missing.delete(m.id);
+    sendHave();
+    return;
+  }
+
+  images.set(m.id, URL.createObjectURL(blob));
   evictImages();
   sendHave();
   apply();
@@ -397,6 +481,10 @@ function renderPanel() {
     title = "Could not connect";
     message = failure;
     actions = ["retry", "leave"];
+  } else if (status === "connected" && state?.mode === "send") {
+    title = "Copy cards";
+    ({ message, actions } = offerText(readable));
+    if (stale) message = "Not hearing from the other device. It may be asleep or out of range.";
   } else if (status === "connected") {
     title = "Ready";
     message = stale
@@ -415,10 +503,91 @@ function renderPanel() {
   el.fullscreen.hidden = !actions.includes("fullscreen") || !document.fullscreenEnabled || !!document.fullscreenElement;
   el.leave.textContent = ended || outdated ? "Back to my cards" : "Leave";
 
+  const ready = offer !== null && picturesPending() === 0 && !copying;
+  el.add.hidden = !actions.includes("copy");
+  el.replace.hidden = !actions.includes("copy");
+  el.add.disabled = !ready;
+  el.replace.disabled = !ready;
+  el.replace.classList.toggle("btn-danger", replaceArmed);
+  setText(el.replaceLabel, replaceArmed ? "Tap again to replace" : "Replace my cards");
+
   // The badge only matters over a card; with no card, the panel says it.
   const showBadge = badge !== "" && shownKey !== "";
   el.badge.hidden = !showBadge;
   setText(el.badge, showBadge ? badge : "");
+}
+
+function plural(n, word) {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
+function offerText(readable) {
+  if (!offer) {
+    return { message: `Joined ${readable}. Getting the cards...`, actions: ["leave"] };
+  }
+
+  const cards = `${plural(offer.cards.length, "card")} from the other device.`;
+  if (copying) return { message: `${cards} Copying...`, actions: ["copy", "leave"] };
+
+  const pending = picturesPending();
+  if (pending > 0) {
+    const got = offer.imageIds.size - pending;
+    return {
+      message: `${cards} Receiving pictures, ${got} of ${offer.imageIds.size}...`,
+      actions: ["copy", "leave"],
+    };
+  }
+
+  const lost = offer.missing.size
+    ? ` ${plural(offer.missing.size, "picture")} could not be sent and will be left out.`
+    : "";
+  return {
+    message:
+      offer.cards.length === 1
+        ? `${cards}${lost} Add it to yours, or replace yours with it.`
+        : `${cards}${lost} Add them to yours, or replace yours with them.`,
+    actions: ["copy", "leave"],
+  };
+}
+
+/* ---- copying the deck ---- */
+
+function disarmReplace() {
+  clearTimeout(armTimer);
+  armTimer = null;
+  replaceArmed = false;
+}
+
+async function copyCards(replace) {
+  if (!offer || copying || picturesPending() > 0) return;
+
+  if (replace && !replaceArmed) {
+    replaceArmed = true;
+    armTimer = setTimeout(() => {
+      disarmReplace();
+      renderPanel();
+    }, ARM_MS);
+    renderPanel();
+    return;
+  }
+
+  disarmReplace();
+  copying = true;
+  renderPanel();
+
+  // Taken now: a fresh copy of the deck arriving mid-write must not mix in.
+  const { cards, blobs } = offer;
+  try {
+    await onImport(cards, blobs, { replace });
+  } catch {
+    copying = false;
+    renderPanel();
+    return;
+  }
+
+  copying = false;
+  guest?.send({ type: "imported" });
+  leaveViewer();
 }
 
 /* ---- the overlay ---- */
@@ -458,6 +627,7 @@ export function leaveViewer() {
   images.forEach((url) => URL.revokeObjectURL(url));
   images.clear();
   incoming.clear();
+  dropOffer();
   state = null;
   status = "idle";
   ended = false;
@@ -502,7 +672,12 @@ function releaseWakeLock() {
   lock?.release().catch(() => {});
 }
 
-export function initViewer() {
+/* `importCards(cards, pictures, { replace })` writes a sent deck into this
+   device's own: `pictures` maps the image ids the cards use to their blobs,
+   and an image layer whose id is not in it is a picture that never came. */
+export function initViewer({ importCards } = {}) {
+  if (importCards) onImport = importCards;
+
   el.viewer = document.getElementById("viewer");
   el.canvas = document.getElementById("viewerCanvas");
   el.title = document.getElementById("viewerTitle");
@@ -511,7 +686,12 @@ export function initViewer() {
   el.retry = document.getElementById("viewerRetry");
   el.fullscreen = document.getElementById("viewerFullscreen");
   el.leave = document.getElementById("viewerLeave");
+  el.add = document.getElementById("viewerAdd");
+  el.replace = document.getElementById("viewerReplace");
+  el.replaceLabel = document.getElementById("viewerReplaceLabel");
 
+  el.add.addEventListener("click", () => copyCards(false));
+  el.replace.addEventListener("click", () => copyCards(true));
   el.retry.addEventListener("click", () => {
     retryDelay = RETRY_FIRST_MS;
     join();

@@ -7,21 +7,33 @@
    waiting when the presenter closes. Cards being edited never leave this
    device; only a card being presented does.
 
-   Two ways to share, picked in the sheet:
+   Three ways to share, picked in the sheet:
 
    Mirror  both screens show the card.
    Extend  the other screen shows the card and this one becomes a presenter
            view: the same card smaller, with the next one beneath it.
+   Send    nothing is shown. The other device is sent the whole deck, hidden
+           layers and pictures included, and can add it to its own cards or
+           replace its own with it. The one time the deck leaves this device,
+           and only because somebody picked it.
 
    The host is authoritative and sends a full snapshot twenty times a second.
    Snapshots carry no pictures: those go once each, in chunks, to a guest
    that says it lacks them, so a card with a photo costs its bytes once and
    a snapshot stays a few hundred bytes. */
 
-import { Host, generateCode, isValidCode, normaliseCode, PROTOCOL_VERSION, CODE_LENGTH } from "./p2p.js";
+import {
+  Host,
+  generateCode,
+  isValidCode,
+  normaliseCode,
+  PROTOCOL_VERSION,
+  CODE_LENGTH,
+  MAX_SHARED_IMAGES,
+} from "./p2p.js";
 import { qrSvg } from "./qr.js";
 import { getImage, readSetting, writeSetting } from "./store.js";
-import { closeModal, openModal } from "./ui.js";
+import { closeModal, openModal, toast } from "./ui.js";
 import { startViewing } from "./viewer.js";
 
 const SNAPSHOT_MS = 50;
@@ -45,6 +57,7 @@ const PREPARED_LIMIT = 12;
 const MODE_NOTES = {
   mirror: "Both screens show the card.",
   extend: "The other screen shows the card. This one shows it smaller, with the next card beneath it.",
+  send: "The other device gets a copy of all your cards, pictures included, to add to its own or to replace them.",
 };
 
 let frame = () => null;
@@ -65,7 +78,8 @@ const el = {};
 /* ---- what the rest of the app reads ---- */
 
 export function shareMode() {
-  return readSetting("shareMode") === "extend" ? "extend" : "mirror";
+  const mode = readSetting("shareMode");
+  return mode === "extend" || mode === "send" ? mode : "mirror";
 }
 
 export function isHosting() {
@@ -81,6 +95,13 @@ export function hostStatus() {
 export function shareNow() {
   if (!host || host.links.size === 0) return;
   host.send(snapshot());
+  pumpImages();
+}
+
+/* The deck was edited and saved. A guest about to copy it gets the edit,
+   rather than whatever the deck was when it joined. */
+export function shareDeckChanged() {
+  sendDeck();
   pumpImages();
 }
 
@@ -181,6 +202,10 @@ function onMessage(message, from) {
         return;
       }
       host.send(snapshot(), from);
+      sendDeck(from);
+      break;
+    case "imported":
+      toast("The other device copied your cards.");
       break;
     case "have":
       guestImages = readImageList(message.images);
@@ -200,7 +225,7 @@ function onMessage(message, from) {
 
 function readImageList(list) {
   if (!Array.isArray(list)) return new Set();
-  return new Set(list.slice(0, 200).filter((id) => typeof id === "string" && id.length <= 64));
+  return new Set(list.slice(0, MAX_SHARED_IMAGES).filter((id) => typeof id === "string" && id.length <= 64));
 }
 
 /* Twenty times a second: drop a guest that has gone quiet, send the
@@ -228,15 +253,18 @@ function beat() {
 function snapshot() {
   const f = frame();
   const root = document.documentElement;
+  const sending = shareMode() === "send";
   const message = {
     type: "state",
+    mode: sending ? "send" : "show",
     presenting: false,
     theme: { color: root.getAttribute("data-color-theme"), mode: root.getAttribute("data-mode") },
   };
 
   // Nothing about the card until play is pressed: the other screen waits,
-  // and what is being edited stays on this one.
-  if (f?.presenting && f.card) {
+  // and what is being edited stays on this one. Sending shows nothing at
+  // all; the deck goes separately, in sendDeck().
+  if (!sending && f?.presenting && f.card) {
     message.presenting = true;
     message.card = wireCard(f.card);
   }
@@ -259,9 +287,44 @@ function wireCard(card) {
   };
 }
 
+/* ---- sending the deck ---- */
+
+function deckCards() {
+  return frame()?.deck?.cards ?? [];
+}
+
+// A copy rather than a picture, so hidden layers go too, flagged, and come
+// out hidden on the other device as they were here.
+function wireDeckCard(card) {
+  return {
+    layout: card.layout,
+    layers: card.layers.map((layer) =>
+      layer.type === "image"
+        ? { type: "image", imageId: layer.imageId, fit: layer.fit, hidden: layer.hidden }
+        : { type: "text", text: layer.text, size: layer.size, align: layer.align, hidden: layer.hidden }
+    ),
+  };
+}
+
+// The whole deck, sent when a guest arrives, when Send is picked, and after
+// every save while it is picked. Words only: the pictures follow through
+// pumpImages() like any others.
+function sendDeck(to) {
+  if (!host || host.links.size === 0 || shareMode() !== "send") return;
+  host.send({ type: "deck", cards: deckCards().map(wireDeckCard) }, to);
+}
+
 /* ---- pictures ---- */
 
 function wantedImages() {
+  if (shareMode() === "send") {
+    // Every picture in the deck, hidden ones included, in card order.
+    const ids = deckCards().flatMap((card) =>
+      card.layers.filter((l) => l.type === "image").map((l) => l.imageId)
+    );
+    return [...new Set(ids)].slice(0, MAX_SHARED_IMAGES);
+  }
+
   const f = frame();
   if (!f) return [];
   // The card on screen first, then its neighbours, so stepping to the next
@@ -303,7 +366,9 @@ async function pumpImages() {
     }
   } catch {
     // Missing from storage or undecodable. Left in `offered`, so it is not
-    // tried again on every beat; the card shows without it.
+    // tried again on every beat; the card shows without it. Said, so a
+    // guest copying the deck is not left waiting on it.
+    if (current()) h.send({ type: "noimage", id }, link.peer);
   } finally {
     pumping = false;
   }
@@ -409,7 +474,9 @@ function statusText() {
     case "waiting":
       return "Waiting for the other screen to join.";
     case "connected":
-      return "Connected. The other screen shows your cards when you press play.";
+      return shareMode() === "send"
+        ? "Connected. The other device can now copy your cards."
+        : "Connected. The other screen shows your cards when you press play.";
     case "error":
       return status.message || "The connection failed.";
     default:
@@ -453,8 +520,13 @@ function wireSheet() {
   el.modeSeg.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-share-mode]");
     if (!btn) return;
-    writeSetting("shareMode", btn.dataset.shareMode === "extend" ? "extend" : "mirror");
+    const mode = btn.dataset.shareMode;
+    writeSetting("shareMode", mode === "extend" || mode === "send" ? mode : "mirror");
     changed();
+    // Straight away rather than on the next beat, and the deck right behind
+    // the snapshot that says to expect one.
+    shareNow();
+    sendDeck();
   });
 
   el.start.addEventListener("click", () => {
@@ -491,7 +563,8 @@ function wireSheet() {
 }
 
 /* `getFrame` returns what the other screen should know about, or null:
-   { presenting, card, nearby: [cards whose pictures are worth sending early] } */
+   { presenting, card, nearby: [cards whose pictures are worth sending early],
+     deck: the whole deck, read only when sending it } */
 export function initShare({ getFrame }) {
   frame = getFrame;
 

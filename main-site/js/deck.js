@@ -88,6 +88,17 @@ function normaliseLayer(layer) {
   };
 }
 
+/* Cards copied in from another device, normalised and given fresh ids
+   throughout, so none of them can collide with a card already here. */
+export function freshCards(cards) {
+  if (!Array.isArray(cards) || cards.length === 0) return [];
+  return normaliseDeck({ cards }).cards.map((card) => ({
+    ...card,
+    id: id(),
+    layers: card.layers.map((layer) => ({ ...layer, id: id() })),
+  }));
+}
+
 /* Every image id the deck still refers to. What pruneImages() is given, so
    a blob is only dropped once no card points at it. */
 export function referencedImageIds(deck) {
