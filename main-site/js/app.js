@@ -22,6 +22,8 @@ import {
   referencedImageIds,
   move,
   cardSummary,
+  soleImage,
+  fillImage,
 } from "./deck.js";
 import { renderCard } from "./render.js";
 import { initShare, isHosting, hostStatus, shareMode, shareNow, shareDeckChanged, bigScreen } from "./share.js";
@@ -73,6 +75,94 @@ function flush() {
 
 async function renderPreview() {
   await renderCard(currentCard(), el.preview, { presenting });
+  const croppable = fillImage(currentCard()) !== null;
+  el.previewFrame.classList.toggle("croppable", croppable);
+  // Reachable by keyboard only while there is a crop to move.
+  if (croppable) {
+    el.previewFrame.tabIndex = 0;
+    el.previewFrame.setAttribute("aria-label", "Card preview. Drag the picture, or use the arrow keys, to move the crop.");
+  } else {
+    el.previewFrame.removeAttribute("tabindex");
+    el.previewFrame.setAttribute("aria-label", "Card preview");
+  }
+}
+
+/* ---- cropping a picture that fills the card ----
+
+   The focus is where the picture is pinned, in percentages, the way CSS
+   object-position reads it: 0 shows the left or top edge, 100 the right or
+   bottom. Dragging moves the picture with the finger, so dragging right shows
+   more of the left of it. A picture exactly the card's shape has nothing to
+   crop one way, and does not move that way. */
+
+const NUDGE = 2;
+const NUDGE_FAR = 10;
+
+function setFocus(layer, img, focus) {
+  const round = (n) => Math.round(Math.min(Math.max(n, 0), 100) * 10) / 10;
+  layer.focus = { x: round(focus.x), y: round(focus.y) };
+  // Straight onto the picture rather than a redraw on every pointer move.
+  if (img) img.style.objectPosition = `${layer.focus.x}% ${layer.focus.y}%`;
+}
+
+function wireCrop() {
+  const frame = el.previewFrame;
+  let drag = null;
+
+  frame.addEventListener("pointerdown", (e) => {
+    const layer = fillImage(currentCard());
+    const img = el.preview.querySelector("img.card-fill");
+    if (!layer || !img?.naturalWidth || e.button > 0) return;
+
+    // How far the picture overhangs the card each way once scaled to cover it.
+    const box = img.getBoundingClientRect();
+    const scale = Math.max(box.width / img.naturalWidth, box.height / img.naturalHeight);
+    drag = {
+      layer,
+      img,
+      pointer: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      from: { ...layer.focus },
+      spareX: img.naturalWidth * scale - box.width,
+      spareY: img.naturalHeight * scale - box.height,
+    };
+    frame.setPointerCapture(e.pointerId);
+    frame.classList.add("cropping");
+    e.preventDefault();
+  });
+
+  frame.addEventListener("pointermove", (e) => {
+    if (!drag || e.pointerId !== drag.pointer) return;
+    const along = (from, delta, spare) => (spare > 0.5 ? from - (delta / spare) * 100 : from);
+    setFocus(drag.layer, drag.img, {
+      x: along(drag.from.x, e.clientX - drag.x, drag.spareX),
+      y: along(drag.from.y, e.clientY - drag.y, drag.spareY),
+    });
+  });
+
+  const finish = (e) => {
+    if (!drag || e.pointerId !== drag.pointer) return;
+    drag = null;
+    frame.classList.remove("cropping");
+    persist();
+  };
+  frame.addEventListener("pointerup", finish);
+  frame.addEventListener("pointercancel", finish);
+
+  // The arrows move the picture the way a drag would, Shift for a long way.
+  frame.addEventListener("keydown", (e) => {
+    const layer = fillImage(currentCard());
+    const step = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (!layer || !step) return;
+    e.preventDefault();
+    const by = e.shiftKey ? NUDGE_FAR : NUDGE;
+    setFocus(layer, el.preview.querySelector("img.card-fill"), {
+      x: layer.focus.x - step[0] * by,
+      y: layer.focus.y - step[1] * by,
+    });
+    persist();
+  });
 }
 
 function renderLayerList() {
@@ -193,23 +283,58 @@ function renderInspector() {
     return;
   }
 
+  // Filling the whole card is only offered on a card with one picture: two
+  // cannot both be behind everything.
+  const sole = soleImage(currentCard()) === layer;
+  const fills = sole && layer.fill;
+  const fits = [
+    { id: "contain", label: "Fit whole image" },
+    { id: "cover", label: "Fill the space" },
+    ...(sole ? [{ id: "screen", label: "Fill the screen" }] : []),
+  ];
+  const active = fills ? "screen" : layer.fit;
+
   el.inspector.innerHTML = `
     <div class="field">
       <span class="field-label">Image fit</span>
       <div class="seg" id="layerFit">
-        <button class="seg-btn${layer.fit === "contain" ? " active" : ""}" type="button"
-          data-fit="contain" aria-pressed="${layer.fit === "contain"}">Fit whole image</button>
-        <button class="seg-btn${layer.fit === "cover" ? " active" : ""}" type="button"
-          data-fit="cover" aria-pressed="${layer.fit === "cover"}">Fill the space</button>
+        ${fits
+          .map(
+            (f) => `<button class="seg-btn${active === f.id ? " active" : ""}" type="button"
+              data-fit="${f.id}" aria-pressed="${active === f.id}">${f.label}</button>`
+          )
+          .join("")}
       </div>
+      ${
+        fills
+          ? `<p class="field-note">Drag the picture in the preview to choose which part shows. The words sit on top of it.</p>`
+          : ""
+      }
     </div>
-    <button class="btn btn-quiet" type="button" id="replaceImage">Replace image</button>`;
+    <div class="button-row">
+      ${fills ? '<button class="btn" type="button" id="recentreImage"><span data-icon="refresh"></span>Re-centre</button>' : ""}
+      <button class="btn btn-quiet" type="button" id="replaceImage">Replace image</button>
+    </div>`;
+  hydrateIcons(el.inspector);
 
   el.inspector.querySelector("#layerFit").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-fit]");
     if (!btn) return;
-    layer.fit = btn.dataset.fit;
+    // Filling the screen keeps the fit underneath, so turning it off puts
+    // the picture back the way it was in its own space.
+    if (btn.dataset.fit === "screen") {
+      layer.fill = true;
+    } else {
+      layer.fill = false;
+      layer.fit = btn.dataset.fit;
+    }
     renderInspector();
+    renderPreview();
+    persist();
+  });
+
+  el.inspector.querySelector("#recentreImage")?.addEventListener("click", () => {
+    layer.focus = { x: 50, y: 50 };
     renderPreview();
     persist();
   });
@@ -785,6 +910,7 @@ function boot() {
   wireModals();
 
   el.preview = document.getElementById("preview");
+  el.previewFrame = el.preview.closest(".card-frame");
   el.layerList = document.getElementById("layerList");
   el.inspector = document.getElementById("inspector");
   el.layoutPicker = document.getElementById("layoutPicker");
@@ -812,6 +938,7 @@ function boot() {
   selectedLayerId = currentCard().layers[0]?.id ?? null;
 
   wireEditor();
+  wireCrop();
   wirePresenter();
   renderAll();
 

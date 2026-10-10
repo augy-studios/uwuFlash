@@ -38,6 +38,7 @@ import {
   MAX_SCREENS,
 } from "./p2p.js";
 import { qrSvg } from "./qr.js";
+import { fillImage } from "./deck.js";
 import { getImage, readSetting, writeSetting } from "./store.js";
 import { closeModal, openModal, toast } from "./ui.js";
 import { startViewing } from "./viewer.js";
@@ -451,15 +452,18 @@ function snapshot(screen) {
 }
 
 // Only what drawing needs. Hidden layers are left behind rather than sent
-// with a flag, since the other screen has no use for them.
+// with a flag, since the other screen has no use for them. Whether the
+// picture fills the card is settled here: a hidden second picture stops it,
+// and the other screen never hears of that one.
 function wireCard(card) {
+  const filling = fillImage(card);
   return {
     layout: card.layout,
     layers: card.layers
       .filter((layer) => !layer.hidden)
       .map((layer) =>
         layer.type === "image"
-          ? { type: "image", imageId: layer.imageId, fit: layer.fit }
+          ? { type: "image", imageId: layer.imageId, fit: layer.fit, fill: layer === filling, focus: layer.focus }
           : { type: "text", text: layer.text, size: layer.size, align: layer.align }
       ),
   };
@@ -478,7 +482,14 @@ function wireDeckCard(card) {
     layout: card.layout,
     layers: card.layers.map((layer) =>
       layer.type === "image"
-        ? { type: "image", imageId: layer.imageId, fit: layer.fit, hidden: layer.hidden }
+        ? {
+            type: "image",
+            imageId: layer.imageId,
+            fit: layer.fit,
+            fill: layer.fill,
+            focus: layer.focus,
+            hidden: layer.hidden,
+          }
         : { type: "text", text: layer.text, size: layer.size, align: layer.align, hidden: layer.hidden }
     ),
   };

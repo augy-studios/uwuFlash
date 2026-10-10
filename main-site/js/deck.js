@@ -34,8 +34,31 @@ export function makeTextLayer(text = "") {
   return { id: id(), type: "text", text, size: "l", align: "center", hidden: false };
 }
 
+/* `fill` puts the picture behind the whole card, edge to edge, with the words
+   over it. It only counts on a card with no other picture; see soleImage().
+   `focus` is the point of the picture kept in view when it is cropped, as
+   percentages across and down, which is what CSS object-position takes. */
 export function makeImageLayer(imageId) {
-  return { id: id(), type: "image", imageId, fit: "contain", hidden: false };
+  return { id: id(), type: "image", imageId, fit: "contain", fill: false, focus: { x: 50, y: 50 }, hidden: false };
+}
+
+/* The card's one picture, or null if it has none or several. Hidden pictures
+   count: they are still on the card, and showing one again should not
+   quietly turn another one's fill off. */
+export function soleImage(card) {
+  const images = card.layers.filter((l) => l.type === "image");
+  return images.length === 1 ? images[0] : null;
+}
+
+// The picture filling the whole card, if it does.
+export function fillImage(card) {
+  const image = soleImage(card);
+  return image && image.fill && !image.hidden ? image : null;
+}
+
+export function readFocus(focus) {
+  const pct = (n) => (Number.isFinite(n) ? Math.min(Math.max(n, 0), 100) : 50);
+  return { x: pct(focus?.x), y: pct(focus?.y) };
 }
 
 export function makeCard(text = "") {
@@ -74,6 +97,8 @@ function normaliseLayer(layer) {
       type: "image",
       imageId: layer.imageId,
       fit: layer.fit === "cover" ? "cover" : "contain",
+      fill: layer.fill === true,
+      focus: readFocus(layer.focus),
       hidden: layer.hidden === true,
     };
   }

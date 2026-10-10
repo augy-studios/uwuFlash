@@ -158,6 +158,7 @@
 }
 
 .card-canvas {
+  position: relative;
   width: 100%;
   height: 100%;
   display: flex;
@@ -229,6 +230,36 @@
 .card-image-missing {
   font-size: 4cqw;
   opacity: 0.55;
+}
+
+/* A picture filling the card: behind everything, padding and all, with the
+   words over it. A glow in the card's own colour keeps them readable on a
+   busy photo without boxing them in. */
+.card-fill {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.card-fill-missing { background: color-mix(in srgb, var(--card-ink) 12%, transparent); }
+.card-canvas.filled > .card-slot { position: relative; }
+.card-canvas.filled .card-text {
+  text-shadow: 0 0 0.25em var(--card-bg), 0 0 0.6em var(--card-bg);
+}
+
+/* The editor preview while the picture fills the card: dragging it moves
+   the crop. touch-action so a finger drags the picture, not the page. */
+.card-frame.croppable {
+  cursor: grab;
+  touch-action: none;
+}
+.card-frame.croppable.cropping { cursor: grabbing; }
+.card-frame:focus-visible {
+  outline: 2px solid var(--brand-ink);
+  outline-offset: 2px;
 }
 
 /* ---- layout picker ---- */
@@ -358,6 +389,10 @@
 .field-label {
   font-size: 0.8rem;
   color: var(--muted);
+}
+.field-note {
+  font-size: 0.8rem;
+  color: var(--muted-strong);
 }
 
 .inspector textarea {

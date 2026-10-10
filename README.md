@@ -20,7 +20,9 @@ three alignments, as many lines as you want.
 
 **Add a picture.** Attach an image and choose where it sits relative to the
 words: centred, to the left of the text, to the right of it, or between two
-blocks of text.
+blocks of text. On a card with one picture, **Fill the screen** puts it behind
+the whole card with the words on top; drag it in the preview to choose which
+part shows.
 
 **Arrange the layers.** Text and images are layers, listed front to back like
 PowerPoint or Photoshop. Reorder them, hide one without deleting it, or take

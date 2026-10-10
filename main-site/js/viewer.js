@@ -24,7 +24,7 @@
 
 import { Guest, normaliseCode, isValidCode, MAX_SHARED_IMAGES, MAX_SCREENS } from "./p2p.js";
 import { renderCard } from "./render.js";
-import { LAYOUTS, DEFAULT_LAYOUT, TEXT_SIZES } from "./deck.js";
+import { LAYOUTS, DEFAULT_LAYOUT, TEXT_SIZES, readFocus } from "./deck.js";
 import { COLOR_THEMES, initTheme, showColorTheme } from "./theme.js";
 import { readSetting, writeSetting } from "./store.js";
 
@@ -381,6 +381,8 @@ function readCard(card) {
           type: "image",
           imageId: layer.imageId,
           fit: layer.fit === "cover" ? "cover" : "contain",
+          fill: layer.fill === true,
+          focus: readFocus(layer.focus),
           hidden: layer.hidden === true,
         };
       }

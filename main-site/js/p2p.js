@@ -15,7 +15,9 @@ export const CODE_LENGTH = 6;
 // 2 added sending the deck. A guest on 1 would sit on "Ready" forever when
 // the host picked Send, so the two are told to reload instead. 3 added Big
 // Screen, where a guest on 2 would show the whole card instead of its piece.
-export const PROTOCOL_VERSION = 3;
+// 4 added a picture filling the card, which a guest on 3 would draw in its
+// own space beside the words, uncropped.
+export const PROTOCOL_VERSION = 4;
 // The most pictures either side keeps track of for the other: the guest's
 // `have` list, and the pictures a sent deck may bring.
 export const MAX_SHARED_IMAGES = 200;
