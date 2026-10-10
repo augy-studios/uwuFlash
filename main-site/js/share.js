@@ -7,15 +7,20 @@
    waiting when the presenter closes. Cards being edited never leave this
    device; only a card being presented does.
 
-   Three ways to share, picked in the sheet:
+   Four ways to share, picked in the sheet:
 
-   Mirror  both screens show the card.
-   Extend  the other screen shows the card and this one becomes a presenter
-           view: the same card smaller, with the next one beneath it.
-   Send    nothing is shown. The other device is sent the whole deck, hidden
-           layers and pictures included, and can add it to its own cards or
-           replace its own with it. The one time the deck leaves this device,
-           and only because somebody picked it.
+   Mirror      both screens show the card.
+   Extend      the other screen shows the card and this one becomes a
+               presenter view: the same card smaller, with the next one
+               beneath it.
+   Big Screen  Extend across several screens at once. Each one joins with the
+               same code and is given a place in a grid; together they show
+               one card, each drawing only its own piece of it. This device
+               is the presenter view, with the grid drawn over the card.
+   Send        nothing is shown. The other device is sent the whole deck,
+               hidden layers and pictures included, and can add it to its own
+               cards or replace its own with it. The one time the deck leaves
+               this device, and only because somebody picked it.
 
    The host is authoritative and sends a full snapshot twenty times a second.
    Snapshots carry no pictures: those go once each, in chunks, to a guest
@@ -30,6 +35,7 @@ import {
   PROTOCOL_VERSION,
   CODE_LENGTH,
   MAX_SHARED_IMAGES,
+  MAX_SCREENS,
 } from "./p2p.js";
 import { qrSvg } from "./qr.js";
 import { getImage, readSetting, writeSetting } from "./store.js";
@@ -54,11 +60,24 @@ const MAX_EDGE = 1920;
 const KEEP_BYTES = 400 * 1024;
 const PREPARED_LIMIT = 12;
 
+const MODES = ["mirror", "extend", "bigscreen", "send"];
 const MODE_NOTES = {
   mirror: "Both screens show the card.",
   extend: "The other screen shows the card. This one shows it smaller, with the next card beneath it.",
+  bigscreen:
+    "Several screens join with the same code and show one card together, each its own piece. This one shows it smaller, with the next card beneath it.",
   send: "The other device gets a copy of all your cards, pictures included, to add to its own or to replace them.",
 };
+
+// What a guest calls its screen, so a reconnect is recognised as the same
+// one. Made by viewer.js.
+const SCREEN_ID = /^[a-z0-9]{6,24}$/;
+// Most screens are near 16:9 or 16:10; this is the shape assumed for one
+// that has not said.
+const DEFAULT_ASPECT = 16 / 10;
+// Two screens trading places in the grid. The screens themselves slide for
+// the same time, in viewer.js.
+const SWAP_MS = 420;
 
 let frame = () => null;
 let host = null;
@@ -67,11 +86,20 @@ let retriedTaken = false;
 let beatTimer = null;
 let shownCode = "";
 
-const lastHeard = new Map(); // guest peer id -> last time anything arrived
-let guestImages = new Set(); // image ids the guest says it holds
-let offered = new Set(); // image ids sent to this guest and not yet confirmed
+// Guest peer id -> { heard: last time anything arrived, images: ids it says
+// it holds, offered: ids sent to it and not yet confirmed, screen: its
+// screen id once it has said hello, aspect: its width over its height }.
+const guests = new Map();
 let pumping = false;
 const prepared = new Map(); // image id -> Promise<{ mime, data }>
+
+/* Big Screen. `order` is the screens by place, left to right and then down,
+   and a screen's number is its place plus one. A screen that drops, or
+   leaves, keeps its place so it comes back to the same piece of the card;
+   only the presenter moves or removes one. `cols` is null until somebody
+   picks it, which puts every screen in one row. */
+const wall = { order: [], cols: null, identify: false };
+let picked = null; // the place tapped first, waiting for a second to swap with
 
 const el = {};
 
@@ -79,7 +107,22 @@ const el = {};
 
 export function shareMode() {
   const mode = readSetting("shareMode");
-  return mode === "extend" || mode === "send" ? mode : "mirror";
+  return MODES.includes(mode) ? mode : "mirror";
+}
+
+/* What the presenter view draws over the card while it is a Big Screen, or
+   null: { cols, rows, aspect: one screen's width over its height,
+   screens: [{ number, online }] by place, identify }. */
+export function bigScreen() {
+  if (!host || shareMode() !== "bigscreen") return null;
+  const { cols, rows } = wallLayout();
+  return {
+    cols,
+    rows,
+    aspect: screenAspect(),
+    screens: wall.order.map((screen, i) => ({ number: i + 1, online: isOnline(screen) })),
+    identify: wall.identify,
+  };
 }
 
 export function isHosting() {
@@ -94,7 +137,7 @@ export function hostStatus() {
    play or stepping a card reaches the other screen without the wait. */
 export function shareNow() {
   if (!host || host.links.size === 0) return;
-  host.send(snapshot());
+  sendSnapshots();
   pumpImages();
 }
 
@@ -115,9 +158,10 @@ async function startHosting() {
   writeSetting("hostCode", code);
   writeSetting("shareRole", "host");
 
-  const h = new Host({ maxGuests: 1 });
+  const h = new Host({ maxGuests: maxGuestsFor(shareMode()) });
   host = h;
   status = { status: "connecting" };
+  loadWall();
   showCode(code);
 
   h.addEventListener("status", ({ detail }) => {
@@ -138,13 +182,11 @@ async function startHosting() {
   h.addEventListener("join", ({ detail }) => {
     if (host !== h) return;
     // A new guest, or the same screen after a reload: either way it holds no
-    // pictures until it says otherwise.
-    lastHeard.set(detail.id, Date.now());
-    guestImages = new Set();
-    offered = new Set();
+    // pictures until it says otherwise, and has no place until its hello.
+    guests.set(detail.id, { heard: Date.now(), images: new Set(), offered: new Set(), screen: null, aspect: null });
   });
 
-  h.addEventListener("leave", ({ detail }) => lastHeard.delete(detail.id));
+  h.addEventListener("leave", ({ detail }) => guests.delete(detail.id));
 
   h.addEventListener("message", ({ detail: { message, from } }) => {
     if (host === h) onMessage(message, from);
@@ -174,7 +216,9 @@ function stopHosting({ tellGuest = false } = {}) {
   host = null;
   clearInterval(beatTimer);
   beatTimer = null;
-  lastHeard.clear();
+  guests.clear();
+  wall.identify = false;
+  picked = null;
   status = { status: "idle" };
 
   if (tellGuest && h.links.size > 0) {
@@ -193,7 +237,8 @@ function restartWithFreshCode({ tellGuest = false } = {}) {
 }
 
 function onMessage(message, from) {
-  lastHeard.set(from, Date.now());
+  const guest = guests.get(from);
+  if (guest) guest.heard = Date.now();
 
   switch (message.type) {
     case "hello":
@@ -201,26 +246,148 @@ function onMessage(message, from) {
         host.send({ type: "outdated" }, from);
         return;
       }
-      host.send(snapshot(), from);
+      if (guest) {
+        guest.aspect = readAspect(message.w, message.h);
+        claimScreen(guest, message.screen, from);
+      }
+      sendSnapshots(from);
       sendDeck(from);
+      break;
+    case "size":
+      if (!guest) break;
+      guest.aspect = readAspect(message.w, message.h);
+      if (shareMode() === "bigscreen") changed();
       break;
     case "imported":
       toast("The other device copied your cards.");
       break;
     case "have":
-      guestImages = readImageList(message.images);
-      guestImages.forEach((id) => offered.delete(id));
+      if (!guest) break;
+      guest.images = readImageList(message.images);
+      guest.images.forEach((id) => guest.offered.delete(id));
       pumpImages();
       break;
     case "bye":
-      // Left on purpose, so the code is spent: one shown to a room in this
-      // session should not keep working in the next.
-      restartWithFreshCode();
+      // One screen of several leaving takes nothing from the rest, and a Big
+      // Screen keeps its code while it is being put together. Otherwise the
+      // code is spent: one shown to a room in this session should not keep
+      // working in the next.
+      dropGuest(from);
+      if (shareMode() === "bigscreen" || host.links.size > 0) changed();
+      else restartWithFreshCode();
       break;
     default:
       // `ping`, and anything from a newer build. Never thrown on.
       break;
   }
+}
+
+function dropGuest(id) {
+  const link = host.links.get(id);
+  guests.delete(id);
+  if (!link) return;
+  host.drop(link);
+  host.refreshStatus();
+}
+
+// Width over height, from a guest's own say-so, so kept to shapes a screen
+// can have.
+function readAspect(w, h) {
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null;
+  return Math.min(Math.max(w / h, 0.25), 4);
+}
+
+/* ---- Big Screen ---- */
+
+function maxGuestsFor(mode) {
+  return mode === "bigscreen" ? MAX_SCREENS : 1;
+}
+
+function claimScreen(guest, screen, from) {
+  if (typeof screen !== "string" || !SCREEN_ID.test(screen)) return;
+  // The same screen back on a new connection before its old one timed out.
+  for (const [id, other] of [...guests]) {
+    if (id !== from && other.screen === screen) dropGuest(id);
+  }
+  guest.screen = screen;
+  if (shareMode() === "bigscreen") placeScreen(screen);
+  changed();
+}
+
+/* A screen new to this wall takes the next place, or, once every place is
+   taken, the first one whose screen is not connected. There is always one:
+   no more screens can be connected than there are places. */
+function placeScreen(screen) {
+  if (wall.order.includes(screen)) return;
+  if (wall.order.length < MAX_SCREENS) {
+    wall.order.push(screen);
+  } else {
+    const free = wall.order.findIndex((s) => !isOnline(s));
+    if (free < 0) return;
+    wall.order[free] = screen;
+  }
+  saveWall();
+}
+
+function isOnline(screen) {
+  for (const guest of guests.values()) if (guest.screen === screen) return true;
+  return false;
+}
+
+function onlineCount() {
+  return wall.order.filter(isOnline).length;
+}
+
+function wallLayout() {
+  const count = Math.max(1, wall.order.length);
+  const cols = Math.min(Math.max(wall.cols ?? count, 1), count);
+  return { count, cols, rows: Math.ceil(count / cols) };
+}
+
+// The middle of what the connected screens say, so one odd screen does not
+// skew the presenter's picture of the rest.
+function screenAspect() {
+  const aspects = [...guests.values()]
+    .filter((g) => g.aspect && wall.order.includes(g.screen))
+    .map((g) => g.aspect)
+    .sort((a, b) => a - b);
+  return aspects.length ? aspects[Math.floor(aspects.length / 2)] : DEFAULT_ASPECT;
+}
+
+// Where one screen sits, sent in its snapshot. Null for a screen with no
+// place, which draws the whole card rather than nothing.
+function wallTile(screen) {
+  const i = wall.order.indexOf(screen);
+  if (i < 0) return null;
+  const { count, cols, rows } = wallLayout();
+  return { n: i + 1, of: count, col: i % cols, row: Math.floor(i / cols), cols, rows, identify: wall.identify };
+}
+
+function loadWall() {
+  wall.order = [...new Set((readSetting("wallOrder") || "").split(","))]
+    .filter((s) => SCREEN_ID.test(s))
+    .slice(0, MAX_SCREENS);
+  const cols = Number.parseInt(readSetting("wallCols"), 10);
+  wall.cols = cols >= 1 && cols <= MAX_SCREENS ? cols : null;
+}
+
+function saveWall() {
+  writeSetting("wallOrder", wall.order.length ? wall.order.join(",") : null);
+  writeSetting("wallCols", wall.cols);
+}
+
+function clearWall() {
+  wall.order = [];
+  wall.cols = null;
+  picked = null;
+  saveWall();
+}
+
+// A change to the wall reaches the screens at once, not on the next beat.
+function wallChanged() {
+  saveWall();
+  changed();
+  shareNow();
 }
 
 function readImageList(list) {
@@ -235,31 +402,42 @@ function beat() {
   if (!host) return;
 
   const now = Date.now();
-  for (const [id, link] of [...host.links]) {
-    if (now - (lastHeard.get(id) ?? now) > GUEST_SILENT_MS) {
-      lastHeard.delete(id);
-      host.drop(link);
-      host.refreshStatus();
-    }
+  for (const [id, guest] of [...guests]) {
+    if (now - guest.heard > GUEST_SILENT_MS) dropGuest(id);
   }
 
   if (host.links.size === 0) return;
-  host.send(snapshot());
+  sendSnapshots();
   pumpImages();
 }
 
 /* ---- the snapshot ---- */
 
-function snapshot() {
+/* One snapshot for every guest, except on a Big Screen, where each is told
+   its own place. A screen yet to say hello has no place to be told, so it
+   waits for one rather than drawing the whole card. */
+function sendSnapshots(to) {
+  if (shareMode() !== "bigscreen") {
+    host.send(snapshot(), to);
+    return;
+  }
+  for (const [id, guest] of guests) {
+    if ((!to || id === to) && guest.screen) host.send(snapshot(guest.screen), id);
+  }
+}
+
+function snapshot(screen) {
   const f = frame();
   const root = document.documentElement;
-  const sending = shareMode() === "send";
+  const mode = shareMode();
+  const sending = mode === "send";
   const message = {
     type: "state",
     mode: sending ? "send" : "show",
     presenting: false,
     theme: { color: root.getAttribute("data-color-theme"), mode: root.getAttribute("data-mode") },
   };
+  if (mode === "bigscreen" && screen) message.wall = wallTile(screen);
 
   // Nothing about the card until play is pressed: the other screen waits,
   // and what is being edited stays on this one. Sending shows nothing at
@@ -334,19 +512,27 @@ function wantedImages() {
     .flatMap((card) => card.layers.filter((l) => l.type === "image" && !l.hidden).map((l) => l.imageId));
 }
 
-async function pumpImages() {
+/* One picture to one guest at a time, the guests in the order they came.
+   Every screen of a Big Screen wants the same pictures, so each is sent the
+   card's own before the next gets anything. */
+function pumpImages() {
   if (pumping || !host) return;
-  const h = host;
-  const link = h.links.values().next().value;
-  if (!link) return;
+  const wanted = wantedImages();
+  for (const [peerId, guest] of guests) {
+    const link = host.links.get(peerId);
+    const id = link && wanted.find((imageId) => !guest.images.has(imageId) && !guest.offered.has(imageId));
+    if (id) {
+      sendImage(host, link, guest, id);
+      return;
+    }
+  }
+}
 
-  const id = wantedImages().find((imageId) => !guestImages.has(imageId) && !offered.has(imageId));
-  if (!id) return;
-
+async function sendImage(h, link, guest, id) {
   pumping = true;
-  offered.add(id);
-  const session = offered;
-  const current = () => host === h && h.links.get(link.peer) === link && offered === session;
+  guest.offered.add(id);
+  // The guest is a fresh entry whenever its screen joins again.
+  const current = () => host === h && h.links.get(link.peer) === link && guests.get(link.peer) === guest;
 
   try {
     const { mime, data } = await preparedImage(id);
@@ -472,8 +658,14 @@ function statusText() {
     case "connecting":
       return "Starting...";
     case "waiting":
-      return "Waiting for the other screen to join.";
+      return shareMode() === "bigscreen"
+        ? "Waiting for screens to join. Open the code on each of them."
+        : "Waiting for the other screen to join.";
     case "connected":
+      if (shareMode() === "bigscreen") {
+        const n = onlineCount();
+        return `${n} screen${n === 1 ? "" : "s"} joined. Together they show your cards when you press play.`;
+      }
       return shareMode() === "send"
         ? "Connected. The other device can now copy your cards."
         : "Connected. The other screen shows your cards when you press play.";
@@ -501,6 +693,121 @@ function renderSheet() {
 
   el.button.classList.toggle("live", host !== null);
   el.button.setAttribute("aria-label", host ? "Sharing screen" : "Share screen");
+
+  renderWall();
+}
+
+/* The screens of a Big Screen as they sit, numbered by place. Tapping one and
+   then another swaps them, which is how the grid here is made to match the
+   screens on the table: show the numbers, see which is where, swap. */
+function renderWall() {
+  const show = host !== null && shareMode() === "bigscreen";
+  el.wall.hidden = !show;
+  if (!show) return;
+
+  const { count, cols, rows } = wallLayout();
+  const aspect = screenAspect();
+  const empty = wall.order.length === 0;
+  if (picked !== null && picked >= wall.order.length) picked = null;
+
+  el.wallEmpty.hidden = !empty;
+  el.wallMap.hidden = empty;
+  el.wallMap.style.setProperty("--cols", cols);
+  el.wallMap.style.setProperty("--aspect", aspect);
+  // Narrower as the grid gets taller, so a column of screens fits the sheet.
+  const mapWidth = Math.min(340, Math.max(100 * cols, (200 * cols * aspect) / rows));
+  el.wallMap.style.setProperty("--map-width", `${Math.round(mapWidth)}px`);
+  el.wallMap.classList.toggle("identifying", wall.identify);
+  el.wallMap.innerHTML = wall.order
+    .map((screen, i) => {
+      const online = isOnline(screen);
+      const label = `Screen ${i + 1}${online ? "" : ", not connected"}`;
+      return `<button class="wall-tile${online ? "" : " offline"}${picked === i ? " picked" : ""}" type="button"
+        data-place="${i}" aria-pressed="${picked === i}" aria-label="${label}">
+        <span class="wall-num">${i + 1}</span>${online ? "" : '<span class="wall-off">Not connected</span>'}
+      </button>`;
+    })
+    .join("");
+
+  el.wallHint.hidden = wall.order.length < 2;
+  el.wallHint.textContent =
+    picked === null ? "Tap two screens to swap them." : `Now tap the screen to swap with ${picked + 1}.`;
+
+  el.wallCols.textContent = `${cols} across`;
+  el.wallFewer.disabled = cols <= 1;
+  el.wallMore.disabled = cols >= count;
+
+  el.wallIdentify.setAttribute("aria-pressed", String(wall.identify));
+  el.wallIdentify.classList.toggle("btn-primary", wall.identify);
+  el.wallIdentifyLabel.textContent = wall.identify ? "Hide numbers" : "Show numbers";
+  el.wallForget.hidden = !wall.order.some((screen) => !isOnline(screen));
+}
+
+function tileAt(place) {
+  return el.wallMap.querySelector(`[data-place="${place}"]`);
+}
+
+// The grid is drawn afresh on every change, so a tile is moved by starting
+// it where it used to be drawn and letting it travel to where it is now.
+function slideTile(place, from, to) {
+  const tile = tileAt(place);
+  if (!tile || reducedMotion()) return;
+  tile.style.zIndex = "1";
+  const slide = tile.animate(
+    [{ transform: `translate(${from.left - to.left}px, ${from.top - to.top}px)` }, { transform: "none" }],
+    { duration: SWAP_MS, easing: "cubic-bezier(0.65, 0, 0.35, 1)" }
+  );
+  slide.onfinish = slide.oncancel = () => tile.style.removeProperty("z-index");
+}
+
+// The stylesheet's reduced motion rule does not reach the Web Animations API.
+function reducedMotion() {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+}
+
+function wireWall() {
+  el.wallMap.addEventListener("click", (e) => {
+    const tile = e.target.closest("[data-place]");
+    if (!tile) return;
+    const place = Number(tile.dataset.place);
+    if (picked === null || picked === place) {
+      picked = picked === place ? null : place;
+      changed();
+      return;
+    }
+    const other = picked;
+    const before = [other, place].map((p) => tileAt(p).getBoundingClientRect());
+    [wall.order[other], wall.order[place]] = [wall.order[place], wall.order[other]];
+    picked = null;
+    wallChanged();
+    // Each from where the other one was, so the two are seen to trade.
+    slideTile(other, before[1], before[0]);
+    slideTile(place, before[0], before[1]);
+  });
+
+  el.wallFewer.addEventListener("click", () => {
+    wall.cols = Math.max(1, wallLayout().cols - 1);
+    wallChanged();
+  });
+  el.wallMore.addEventListener("click", () => {
+    wall.cols = Math.min(wallLayout().count, wallLayout().cols + 1);
+    wallChanged();
+  });
+
+  // Every screen shows its number at once, and the grid here shows the same
+  // numbers, until pressed again.
+  el.wallIdentify.addEventListener("click", () => {
+    wall.identify = !wall.identify;
+    changed();
+    shareNow();
+  });
+
+  // The places of screens that are not coming back. The rest close up.
+  el.wallForget.addEventListener("click", () => {
+    wall.order = wall.order.filter(isOnline);
+    picked = null;
+    wallChanged();
+  });
 }
 
 function changed() {
@@ -520,8 +827,16 @@ function wireSheet() {
   el.modeSeg.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-share-mode]");
     if (!btn) return;
-    const mode = btn.dataset.shareMode;
-    writeSetting("shareMode", mode === "extend" || mode === "send" ? mode : "mirror");
+    const mode = MODES.includes(btn.dataset.shareMode) ? btn.dataset.shareMode : "mirror";
+    writeSetting("shareMode", mode);
+    if (host) {
+      // Screens already joined become the first places of a Big Screen.
+      // Leaving one keeps them connected, showing the same card.
+      host.maxGuests = maxGuestsFor(mode);
+      if (mode === "bigscreen") {
+        for (const guest of guests.values()) if (guest.screen) placeScreen(guest.screen);
+      }
+    }
     changed();
     // Straight away rather than on the next beat, and the deck right behind
     // the snapshot that says to expect one.
@@ -539,6 +854,9 @@ function wireSheet() {
   el.stop.addEventListener("click", () => {
     stopHosting({ tellGuest: true });
     writeSetting("shareRole", null);
+    // A Big Screen put together next time starts from no screens. A new
+    // code, or a reload, keeps the places for the screens to come back to.
+    clearWall();
     changed();
   });
 
@@ -585,11 +903,22 @@ export function initShare({ getFrame }) {
   el.joinForm = document.getElementById("joinForm");
   el.joinInput = document.getElementById("joinCode");
   el.joinNote = document.getElementById("joinNote");
+  el.wall = document.getElementById("wall");
+  el.wallEmpty = document.getElementById("wallEmpty");
+  el.wallMap = document.getElementById("wallMap");
+  el.wallHint = document.getElementById("wallHint");
+  el.wallFewer = document.getElementById("wallFewer");
+  el.wallCols = document.getElementById("wallCols");
+  el.wallMore = document.getElementById("wallMore");
+  el.wallIdentify = document.getElementById("wallIdentify");
+  el.wallIdentifyLabel = document.getElementById("wallIdentifyLabel");
+  el.wallForget = document.getElementById("wallForget");
 
   el.host = document.getElementById("shareHost");
   if (el.host) el.host.textContent = location.host;
 
   wireSheet();
+  wireWall();
   renderSheet();
 
   // Sharing when the page was reloaded: back on the same code, so the other

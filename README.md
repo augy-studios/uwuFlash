@@ -40,6 +40,13 @@ card you are presenting. **Mirror** puts the card on both screens; **Extend**
 puts it on the other screen and turns yours into a presenter view, with the
 next card underneath, like a projector.
 
+**Make one big screen out of several.** **Big Screen** works like Extend, but
+any number of devices up to twelve can join with the same code, and together
+they show one card, each its own piece, like a video wall. **Show numbers**
+puts each screen's number on it and on the grid in your share sheet at the same
+time, so you can see which is which; tap two in the grid to swap them, and set
+how many sit across. A screen that drops out comes back to the same place.
+
 **Send your cards to another device.** The same sharing, with **Send cards**
 picked instead, copies your whole deck, pictures included, to the other
 device. It can add them to its own cards or replace its own with them.
@@ -64,6 +71,9 @@ open full screen like an app.
 - The screen button beside it shares. Choose Mirror or Extend, press **Start
   sharing**, and scan the QR code with the other device (or type the code into
   **Be the other device** on it). Then press play.
+- For **Big Screen**, join from every screen the same way. Line them up, press
+  **Show numbers**, and swap screens in the grid until it matches the table.
+  Screens of one size and shape line up best.
 - To copy your cards to another device, choose **Send cards** instead and join
   the same way. Once the pictures have arrived, the other device picks **Add
   to my cards** or **Replace my cards** (which needs a second tap).

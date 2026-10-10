@@ -142,11 +142,13 @@
     <div class="present hidden" id="present" role="dialog" aria-modal="true" aria-label="Presenting">
         <div class="card-canvas presenting" id="presentCanvas"></div>
         <!-- Presenter view, shown instead of the card while sharing in
-             extend mode. The tap zones above still switch cards. -->
+             Extend or Big Screen. The tap zones above still switch cards. -->
         <div class="present-remote" id="presentRemote">
             <p class="remote-label" id="remoteStatus"></p>
             <div class="remote-frame">
                 <div class="card-canvas presenting" id="remoteNow"></div>
+                <!-- Big Screen only: where each screen's piece is. -->
+                <div class="remote-grid" id="remoteGrid" aria-hidden="true" hidden></div>
             </div>
             <p class="remote-label">Next</p>
             <div class="remote-frame remote-next">
@@ -164,7 +166,11 @@
     <!-- The other screen. Covers the editor while this device is showing
          somebody else's cards; see js/viewer.js. -->
     <div class="viewer hidden" id="viewer" role="dialog" aria-modal="true" aria-label="Shared screen">
-        <div class="card-canvas presenting" id="viewerCanvas"></div>
+        <!-- The size of the whole Big Screen, moved so this screen's piece
+             is the part on show; the size of this screen otherwise. -->
+        <div class="viewer-wall" id="viewerWall">
+            <div class="card-canvas presenting" id="viewerCanvas"></div>
+        </div>
         <div class="viewer-panel">
             <h2 id="viewerTitle"></h2>
             <p id="viewerMessage" role="status"></p>
@@ -186,6 +192,11 @@
             </div>
         </div>
         <p class="viewer-badge" id="viewerBadge" role="status" hidden></p>
+        <!-- This screen's place in a Big Screen, while the host shows the numbers. -->
+        <div class="viewer-number" id="viewerNumber" role="status" hidden>
+            <span class="viewer-number-value" id="viewerNumberValue"></span>
+            <span class="viewer-number-of" id="viewerNumberOf"></span>
+        </div>
         <div class="viewer-controls">
             <button class="viewer-btn" id="viewerFullscreenCorner" type="button" aria-label="Toggle full screen">
                 <span data-icon="fullscreen"></span>
@@ -210,6 +221,7 @@
             <div class="seg" id="shareMode">
                 <button class="seg-btn" type="button" data-share-mode="mirror" aria-pressed="false">Mirror</button>
                 <button class="seg-btn" type="button" data-share-mode="extend" aria-pressed="false">Extend</button>
+                <button class="seg-btn" type="button" data-share-mode="bigscreen" aria-pressed="false">Big Screen</button>
                 <button class="seg-btn" type="button" data-share-mode="send" aria-pressed="false">Send cards</button>
             </div>
             <p class="mode-note" id="shareModeNote"></p>
@@ -227,6 +239,32 @@
                 <p class="share-help">Scan the code with the other device, or open <span id="shareHost"></span> on it, tap Share screen and type the code.</p>
                 <p class="share-link" id="shareLink"></p>
                 <p class="share-status" id="shareStatus" role="status"></p>
+
+                <!-- Big Screen only: the screens by place, to put in order. -->
+                <div class="wall" id="wall" hidden>
+                    <p class="modal-section-label">Screens</p>
+                    <p class="share-help" id="wallEmpty">No screens yet. Join from each one with the code above.</p>
+                    <div class="wall-map" id="wallMap"></div>
+                    <p class="share-help" id="wallHint"></p>
+                    <div class="wall-row">
+                        <button class="btn" id="wallFewer" type="button" aria-label="Fewer screens across">
+                            <span data-icon="left"></span>
+                        </button>
+                        <span class="wall-cols" id="wallCols" aria-live="polite"></span>
+                        <button class="btn" id="wallMore" type="button" aria-label="More screens across">
+                            <span data-icon="right"></span>
+                        </button>
+                    </div>
+                    <div class="button-row wall-actions">
+                        <button class="btn" id="wallIdentify" type="button" aria-pressed="false">
+                            <span data-icon="grid"></span><span id="wallIdentifyLabel">Show numbers</span>
+                        </button>
+                        <button class="btn btn-quiet" id="wallForget" type="button" hidden>
+                            <span data-icon="trash"></span>Remove missing
+                        </button>
+                    </div>
+                </div>
+
                 <div class="button-row">
                     <button class="btn" id="shareNewCode" type="button">
                         <span data-icon="refresh"></span>New code

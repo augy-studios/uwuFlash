@@ -563,17 +563,52 @@ body.presenting { overflow: hidden; }
   opacity: 0.7;
 }
 
+/* --wall-aspect is 16:10 for one other screen, and the shape of the whole
+   grid on a Big Screen; app.js sets it. */
 .remote-frame {
+  position: relative;
   container-type: size;
-  aspect-ratio: 16 / 10;
-  width: min(100%, calc(50vh * 1.6));
+  aspect-ratio: var(--wall-aspect, 1.6);
+  width: min(100%, calc(50vh * var(--wall-aspect, 1.6)));
   border-radius: 14px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--card-ink) 30%, transparent);
 }
 .remote-frame.remote-next {
-  width: min(60%, calc(22vh * 1.6));
+  width: min(60%, calc(22vh * var(--wall-aspect, 1.6)));
   opacity: 0.75;
+}
+
+/* Over the card, not instead of it: lines where one screen meets the next,
+   and each screen's number in its corner, large while the numbers are on. */
+.remote-grid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 1), 1fr);
+  grid-template-rows: repeat(var(--rows, 1), 1fr);
+  pointer-events: none;
+}
+.remote-cell {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 4px 7px;
+  font-size: 0.75rem;
+  color: var(--card-ink);
+  outline: 1px dashed color-mix(in srgb, var(--card-ink) 45%, transparent);
+  outline-offset: -0.5px;
+}
+.remote-cell.offline { opacity: 0.4; }
+.remote-cell.blank {
+  outline: none;
+  background: color-mix(in srgb, var(--card-ink) 8%, transparent);
+}
+.remote-grid.identifying .remote-cell:not(.blank) {
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(1rem, calc(40cqh / var(--rows, 1)), 6rem);
+  background: color-mix(in srgb, var(--card-bg) 70%, transparent);
 }
 
 /* ---- share sheet ---- */
@@ -635,6 +670,65 @@ body.presenting { overflow: hidden; }
   user-select: text;
 }
 
+/* Big Screen: the screens by place, each the shape the screens say they
+   are. share.js narrows it as the grid gets taller. */
+.wall {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wall-map {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr));
+  gap: 6px;
+  width: min(100%, var(--map-width, 340px));
+  margin: 0 auto;
+}
+.wall-tile {
+  position: relative;
+  aspect-ratio: var(--aspect, 1.6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-radius: 8px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface-strong);
+  color: var(--ink);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.wall-tile:hover { transform: translateY(-1px); }
+.wall-tile.picked {
+  background: var(--brand-fill);
+  color: var(--on-brand);
+}
+.wall-tile.offline {
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted-strong);
+}
+.wall-num {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.wall-map.identifying .wall-num { font-size: 1.9rem; }
+.wall-off { font-size: 0.65rem; }
+
+.wall-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.wall-cols {
+  min-width: 6.5em;
+  text-align: center;
+  font-size: 0.88rem;
+  color: var(--ink);
+}
+.wall-actions { justify-content: center; }
+
 .join-row {
   display: flex;
   gap: 8px;
@@ -675,6 +769,7 @@ body.presenting { overflow: hidden; }
   --card-bg: var(--brand);
   --card-ink: var(--on-brand);
   container-type: size;
+  overflow: hidden;
   background: var(--card-bg);
   color: var(--card-ink);
 }
@@ -686,12 +781,45 @@ body.presenting { overflow: hidden; }
 
 body.viewing { overflow: hidden; }
 
-#viewerCanvas {
+/* One screen's worth by default. On a Big Screen it is every screen's worth,
+   pulled up and left by this screen's place so its own piece is the part
+   inside the viewer. Its own container, so the card's sizes are against the
+   whole of it and match from one screen to the next. */
+.viewer-wall {
+  position: absolute;
+  left: calc(var(--col, 0) * -100%);
+  top: calc(var(--row, 0) * -100%);
+  width: calc(var(--cols, 1) * 100%);
+  height: calc(var(--rows, 1) * 100%);
+  container-type: size;
+}
+.viewer:not(.showing) .viewer-wall { display: none; }
+
+#viewerCanvas { padding: 5cqw; }
+
+/* This screen's number, big enough to read from where the screens are being
+   arranged, over the card if one is showing. */
+.viewer-number {
   position: absolute;
   inset: 0;
-  padding: 5cqw;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1cqh;
+  background: var(--card-bg);
+  color: var(--card-ink);
+  pointer-events: none;
 }
-.viewer:not(.showing) #viewerCanvas { display: none; }
+.viewer-number-value {
+  font-size: min(60cqh, 50cqw);
+  line-height: 1;
+}
+.viewer-number-of {
+  font-size: clamp(1rem, 5cqh, 3rem);
+  opacity: 0.7;
+}
 
 .viewer-panel {
   position: absolute;

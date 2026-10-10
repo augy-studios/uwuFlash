@@ -13,11 +13,16 @@ const PEER_PREFIX = "uwuflash-";
 const CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXYZ23456789";
 export const CODE_LENGTH = 6;
 // 2 added sending the deck. A guest on 1 would sit on "Ready" forever when
-// the host picked Send, so the two are told to reload instead.
-export const PROTOCOL_VERSION = 2;
+// the host picked Send, so the two are told to reload instead. 3 added Big
+// Screen, where a guest on 2 would show the whole card instead of its piece.
+export const PROTOCOL_VERSION = 3;
 // The most pictures either side keeps track of for the other: the guest's
 // `have` list, and the pictures a sent deck may bring.
 export const MAX_SHARED_IMAGES = 200;
+// The most screens one Big Screen takes. Each is sent its own snapshot twenty
+// times a second, a few hundred bytes apiece, and twelve is a wall of phones
+// four across and three down.
+export const MAX_SCREENS = 12;
 const CONNECT_TIMEOUT_MS = 15000;
 
 // STUN only. Supplying `config` replaces PeerJS's default, which includes a
@@ -246,10 +251,13 @@ export class Host extends Connection {
 /* ---- guest ---- */
 
 export class Guest extends Connection {
-  constructor() {
+  // `introduce` returns what goes in `hello` beside the version: asked at the
+  // moment the link opens, so it describes the screen as it is then.
+  constructor({ introduce = () => ({}) } = {}) {
     super();
     this.link = null;
     this.timer = null;
+    this.introduce = introduce;
   }
 
   async connect(code, metadata) {
@@ -282,7 +290,7 @@ export class Guest extends Connection {
     if (link !== this.link) return;
     clearTimeout(this.timer);
     this.setStatus("connected");
-    this.send({ type: "hello", v: PROTOCOL_VERSION });
+    this.send({ ...this.introduce(), type: "hello", v: PROTOCOL_VERSION });
   }
 
   onLinkClosed(link, everOpened) {

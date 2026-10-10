@@ -24,7 +24,7 @@ import {
   cardSummary,
 } from "./deck.js";
 import { renderCard } from "./render.js";
-import { initShare, isHosting, hostStatus, shareMode, shareNow, shareDeckChanged } from "./share.js";
+import { initShare, isHosting, hostStatus, shareMode, shareNow, shareDeckChanged, bigScreen } from "./share.js";
 import { initViewer } from "./viewer.js";
 
 /* ---- state ---- */
@@ -439,9 +439,11 @@ function reorderLayer(layerId, delta) {
 
 /* Sharing in extend mode turns the presenter into a presenter view: the
    other screen has the card, so this one shows it smaller with the next card
-   beneath it. Mirror, or not sharing at all, is the plain full screen card. */
+   beneath it. Big Screen is the same, with the card drawn the shape of the
+   whole grid and the grid over it. Mirror, or not sharing at all, is the
+   plain full screen card. */
 function isPresenterView() {
-  return isHosting() && shareMode() === "extend";
+  return isHosting() && (shareMode() === "extend" || shareMode() === "bigscreen");
 }
 
 async function showPresentCard() {
@@ -458,8 +460,16 @@ async function showPresentCard() {
     return;
   }
 
-  el.remoteStatus.textContent =
-    hostStatus() === "connected" ? "On the other screen" : "Waiting for the other screen to join";
+  const wall = bigScreen();
+  showWallGrid(wall);
+  if (wall) {
+    const online = wall.screens.filter((s) => s.online).length;
+    el.remoteStatus.textContent =
+      online > 0 ? `On ${online} screen${online === 1 ? "" : "s"}` : "Waiting for screens to join";
+  } else {
+    el.remoteStatus.textContent =
+      hostStatus() === "connected" ? "On the other screen" : "Waiting for the other screen to join";
+  }
 
   const next = deck.cards[cardIndex + 1];
   if (!next) {
@@ -470,6 +480,25 @@ async function showPresentCard() {
     renderCard(currentCard(), el.remoteNow, { presenting: true }),
     next ? renderCard(next, el.remoteNext, { presenting: true }) : null,
   ]);
+}
+
+/* The frames take the shape of the whole Big Screen, so what is drawn here
+   is what the screens show between them, and the grid marks where one ends
+   and the next begins. Places past the last screen in a short bottom row are
+   left blank. */
+function showWallGrid(wall) {
+  el.present.style.setProperty("--wall-aspect", wall ? (wall.cols * wall.aspect) / wall.rows : 1.6);
+  el.remoteGrid.hidden = !wall;
+  if (!wall) return;
+
+  el.remoteGrid.style.setProperty("--cols", wall.cols);
+  el.remoteGrid.style.setProperty("--rows", wall.rows);
+  el.remoteGrid.classList.toggle("identifying", wall.identify);
+  el.remoteGrid.innerHTML = Array.from({ length: wall.cols * wall.rows }, (_, i) => {
+    const screen = wall.screens[i];
+    if (!screen) return '<span class="remote-cell blank"></span>';
+    return `<span class="remote-cell${screen.online ? "" : " offline"}">${screen.number}</span>`;
+  }).join("");
 }
 
 /* What the other screen is told about. Nothing card shaped leaves this
@@ -768,6 +797,7 @@ function boot() {
   el.remoteNow = document.getElementById("remoteNow");
   el.remoteNext = document.getElementById("remoteNext");
   el.remoteStatus = document.getElementById("remoteStatus");
+  el.remoteGrid = document.getElementById("remoteGrid");
 
   el.layoutPicker.innerHTML = LAYOUTS.map(
     (l) =>

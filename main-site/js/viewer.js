@@ -8,6 +8,11 @@
    or its saved theme: pictures are held in memory only, and the colours go
    back to this device's own when it leaves.
 
+   On a Big Screen this is one of several screens showing one card. The host
+   says where it sits in the grid, and it draws the whole card at the size of
+   the whole grid with only its own piece inside the screen. Asked to, it
+   shows its number over everything, so the screens can be put in order.
+
    The one exception is a host that picked Send. Then nothing is shown, and
    the host's whole deck arrives instead, pictures and all, with a choice to
    add it to this device's cards or replace them. Even then the deck is only
@@ -17,7 +22,7 @@
    field by field before it is used, and nothing received goes near
    innerHTML except through the card renderer, which escapes text. */
 
-import { Guest, normaliseCode, isValidCode, MAX_SHARED_IMAGES } from "./p2p.js";
+import { Guest, normaliseCode, isValidCode, MAX_SHARED_IMAGES, MAX_SCREENS } from "./p2p.js";
 import { renderCard } from "./render.js";
 import { LAYOUTS, DEFAULT_LAYOUT, TEXT_SIZES } from "./deck.js";
 import { COLOR_THEMES, initTheme, showColorTheme } from "./theme.js";
@@ -32,6 +37,12 @@ const BEAT_MS = 500;
 const IMAGE_WAIT_MS = 4000;
 const RETRY_FIRST_MS = 2000;
 const RETRY_MAX_MS = 30000;
+// A window being dragged to a new size says so many times a second; the
+// host only needs where it ends up.
+const RESIZE_MS = 250;
+// A Big Screen screen moving to a new place; the same time as the tiles in
+// the host's grid, in share.js.
+const SWAP_MS = 420;
 
 const MAX_IMAGES = 40;
 const MAX_INCOMING = 4;
@@ -62,6 +73,10 @@ let status = "idle";
 let failure = "";
 let ended = false;
 let outdated = false;
+let full = false;
+let screenId = "";
+let resizeTimer = null;
+let wallKey = "";
 
 // After a connection that was working drops, keep trying quietly rather
 // than showing a failure: the usual cause is the host's phone locking, and
@@ -111,6 +126,31 @@ export function startViewing(input) {
   return true;
 }
 
+/* What this screen calls itself to the host, so a Big Screen puts it back in
+   the same place after a dropped connection or a reload. Kept for the tab,
+   not the device: two tabs side by side are two screens. */
+function ownScreenId() {
+  if (screenId) return screenId;
+  try {
+    screenId = sessionStorage.getItem("uwuFlash.screenId") || "";
+  } catch {
+    /* storage refused; made fresh below and kept for this page */
+  }
+  if (!/^[a-z0-9]{6,24}$/.test(screenId)) {
+    screenId = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => (b % 36).toString(36)).join("");
+    try {
+      sessionStorage.setItem("uwuFlash.screenId", screenId);
+    } catch {
+      /* as above */
+    }
+  }
+  return screenId;
+}
+
+function introduce() {
+  return { screen: ownScreenId(), w: window.innerWidth, h: window.innerHeight };
+}
+
 async function join() {
   clearTimeout(retryTimer);
   retryTimer = null;
@@ -119,10 +159,11 @@ async function join() {
   guest = null;
   old?.close();
 
-  const g = new Guest();
+  const g = new Guest({ introduce });
   guest = g;
   status = "connecting";
   failure = "";
+  full = false;
   renderPanel();
 
   g.addEventListener("status", ({ detail }) => {
@@ -190,14 +231,23 @@ function hangUp() {
 
 function onMessage(message) {
   switch (message.type) {
-    case "state":
-      state = readState(message);
+    case "state": {
+      const next = readState(message);
+      const move = placeMove(state?.wall, next.wall);
+      // Taken before anything changes: what is on show at the old place.
+      const leaving = move ? frontLayer() : null;
+      const ghost = leaving ? ghostOf(leaving) : null;
+
+      state = next;
       lastStateAt = Date.now();
       // The host went back to showing cards. Its deck is no longer on offer.
       if (state.mode !== "send" && offer) dropOffer();
       wearTheme(state.theme);
       apply();
-      break;
+      renderPanel();
+      if (ghost) slideAcross(leaving, ghost, frontLayer(), move);
+      return;
+    }
     case "deck":
       offer = readOffer(message, offer);
       disarmReplace();
@@ -224,6 +274,13 @@ function onMessage(message) {
     case "outdated":
       outdated = true;
       hangUp();
+      break;
+    case "full":
+      hangUp();
+      // Coming back from a drop, the place held by this screen's old
+      // connection frees up when the host notices it went quiet.
+      if (resuming) scheduleRetry();
+      else full = true;
       break;
     default:
       // Anything from a newer build. Never thrown on.
@@ -253,7 +310,25 @@ function readState(message) {
   };
   const mode = message.mode === "send" ? "send" : "show";
   const card = mode === "show" && message.presenting === true ? readCard(message.card) : null;
-  return { mode, presenting: card !== null, card, theme };
+  const wall = mode === "show" ? readWall(message.wall) : null;
+  return { mode, presenting: card !== null, card, theme, wall };
+}
+
+/* Where this screen sits in a Big Screen, or null for the whole card. Every
+   number has to agree with the others, or the screen draws the whole card
+   rather than some other screen's piece. */
+function readWall(wall) {
+  if (!wall || typeof wall !== "object") return null;
+  const within = (n, min, max) => Number.isInteger(n) && n >= min && n <= max;
+  const { n, of, col, row, cols, rows } = wall;
+  if (
+    !within(cols, 1, MAX_SCREENS) || !within(rows, 1, MAX_SCREENS) || cols * rows > MAX_SCREENS * 2 ||
+    !within(col, 0, cols - 1) || !within(row, 0, rows - 1) ||
+    !within(of, 1, MAX_SCREENS) || !within(n, 1, of)
+  ) {
+    return null;
+  }
+  return { n, of, col, row, cols, rows, identify: wall.identify === true };
 }
 
 /* A sent deck. Cards that do not read are dropped, and so are image layers
@@ -409,7 +484,25 @@ function wearTheme({ color, mode }) {
   if (root.getAttribute("data-mode") !== mode) root.setAttribute("data-mode", mode);
 }
 
+/* The card is drawn the size of the whole grid and moved so this screen's
+   piece is the part inside it. Sizes on the card are relative to the box it
+   is drawn in, so the words come out one size across every screen. Each
+   screen takes an equal share whatever its own size, which lines up best on
+   screens of one shape. */
+function placeWall(wall) {
+  const { cols = 1, rows = 1, col = 0, row = 0 } = wall ?? {};
+  const key = `${cols},${rows},${col},${row}`;
+  if (key === wallKey) return;
+  wallKey = key;
+  const style = el.wall.style;
+  style.setProperty("--cols", cols);
+  style.setProperty("--rows", rows);
+  style.setProperty("--col", col);
+  style.setProperty("--row", row);
+}
+
 function apply() {
+  placeWall(state?.wall);
   const card = state?.presenting ? state.card : null;
   if (!card) {
     if (shownKey) showNothing();
@@ -442,6 +535,55 @@ function apply() {
   el.viewer.classList.add("showing");
 }
 
+/* ---- moving place ----
+
+   When the host swaps this screen with another, what is on it slides off
+   towards the other screen's place in the grid and the new picture follows
+   in behind, all one way. The other screen does the same towards this one,
+   so between them the two are seen to trade. */
+
+// Which way this screen's place moved in the same grid, as -1, 0 or 1 across
+// and down, or null. A grid of a new shape moves every screen at once, which
+// is not a swap.
+function placeMove(before, after) {
+  if (!before || !after || before.cols !== after.cols || before.rows !== after.rows) return null;
+  const dx = Math.sign(after.col - before.col);
+  const dy = Math.sign(after.row - before.row);
+  return dx || dy ? { dx, dy } : null;
+}
+
+// What is on show: the number, else the card, else the words saying what
+// is going on.
+function frontLayer() {
+  if (!el.number.hidden) return el.number;
+  if (el.viewer.classList.contains("showing")) return el.wall;
+  return el.panel;
+}
+
+// A still copy of what is leaving, which goes while the real one comes back
+// in showing the new place. Ids are left on: it is only there for the slide,
+// it sits after the real one so lookups find that first, and the card's own
+// styles need them.
+function ghostOf(layer) {
+  const ghost = layer.cloneNode(true);
+  ghost.removeAttribute("role");
+  ghost.setAttribute("aria-hidden", "true");
+  ghost.style.pointerEvents = "none";
+  return ghost;
+}
+
+function slideAcross(leaving, ghost, arriving, { dx, dy }) {
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  const x = dx * el.viewer.clientWidth;
+  const y = dy * el.viewer.clientHeight;
+  const timing = { duration: SWAP_MS, easing: "cubic-bezier(0.65, 0, 0.35, 1)" };
+
+  leaving.after(ghost);
+  const out = ghost.animate([{ transform: "none" }, { transform: `translate(${x}px, ${y}px)` }], timing);
+  out.onfinish = out.oncancel = () => ghost.remove();
+  arriving.animate([{ transform: `translate(${-x}px, ${-y}px)` }, { transform: "none" }], timing);
+}
+
 function showNothing() {
   shownKey = "";
   if (!el.canvas) return;
@@ -469,6 +611,10 @@ function renderPanel() {
   } else if (outdated) {
     title = "Different versions";
     message = "These two devices are running different versions of uwuFlash. Reload the page on both.";
+  } else if (full) {
+    title = "No room";
+    message = `The other device already has as many screens as it takes, ${MAX_SCREENS} for a Big Screen. Try again once one has left.`;
+    actions = ["retry", "leave"];
   } else if (resuming) {
     title = "Reconnecting";
     message = "Lost the connection to the other device. Trying again...";
@@ -485,6 +631,13 @@ function renderPanel() {
     title = "Copy cards";
     ({ message, actions } = offerText(readable));
     if (stale) message = "Not hearing from the other device. It may be asleep or out of range.";
+  } else if (status === "connected" && state?.wall) {
+    title = `Screen ${state.wall.n} of ${state.wall.of}`;
+    message = stale
+      ? "Not hearing from the other device. It may be asleep or out of range."
+      : `Joined ${readable} as part of a Big Screen. This screen shows its piece of each card when the other device presses play.`;
+    actions = ["fullscreen", "leave"];
+    if (stale) badge = "Connection looks stale";
   } else if (status === "connected") {
     title = "Ready";
     message = stale
@@ -515,6 +668,14 @@ function renderPanel() {
   const showBadge = badge !== "" && shownKey !== "";
   el.badge.hidden = !showBadge;
   setText(el.badge, showBadge ? badge : "");
+
+  // Over everything, card included, while the host has the numbers showing.
+  const wall = status === "connected" && !ended ? state?.wall : null;
+  el.number.hidden = !wall?.identify;
+  if (wall?.identify) {
+    setText(el.numberValue, String(wall.n));
+    setText(el.numberOf, `of ${wall.of}`);
+  }
 }
 
 function plural(n, word) {
@@ -632,6 +793,9 @@ export function leaveViewer() {
   status = "idle";
   ended = false;
   outdated = false;
+  full = false;
+  clearTimeout(resizeTimer);
+  placeWall(null);
   showNothing();
 
   open = false;
@@ -679,7 +843,12 @@ export function initViewer({ importCards } = {}) {
   if (importCards) onImport = importCards;
 
   el.viewer = document.getElementById("viewer");
+  el.wall = document.getElementById("viewerWall");
   el.canvas = document.getElementById("viewerCanvas");
+  el.panel = el.viewer.querySelector(".viewer-panel");
+  el.number = document.getElementById("viewerNumber");
+  el.numberValue = document.getElementById("viewerNumberValue");
+  el.numberOf = document.getElementById("viewerNumberOf");
   el.title = document.getElementById("viewerTitle");
   el.message = document.getElementById("viewerMessage");
   el.badge = document.getElementById("viewerBadge");
@@ -701,6 +870,16 @@ export function initViewer({ importCards } = {}) {
   document.getElementById("viewerFullscreenCorner").addEventListener("click", toggleFullscreen);
   document.getElementById("viewerExit").addEventListener("click", leaveViewer);
   document.addEventListener("fullscreenchange", renderPanel);
+
+  // The shape of this screen is the shape of its piece of a Big Screen, and
+  // going full screen or turning a phone changes it.
+  window.addEventListener("resize", () => {
+    if (!open) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      guest?.send({ type: "size", w: window.innerWidth, h: window.innerHeight });
+    }, RESIZE_MS);
+  });
 
   // The browser drops a wake lock when the page is hidden, and a channel
   // often dies with a backgrounded page. Both come back here.
