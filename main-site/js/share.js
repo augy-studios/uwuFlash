@@ -76,6 +76,18 @@ const SCREEN_ID = /^[a-z0-9]{6,24}$/;
 // Most screens are near 16:9 or 16:10; this is the shape assumed for one
 // that has not said.
 const DEFAULT_ASPECT = 16 / 10;
+// The card as it is made in the editor, which is the shape the other screen
+// draws it in under Extend.
+const CARD_ASPECT = 16 / 10;
+// A screen that has not said how big it is, in millimetres: a phone on its
+// side.
+const DEFAULT_SIZE = { w: 150, h: 70 };
+// Between two screens of a Big Screen, the part of the card that lands on
+// their bezels, in millimetres. Two phones in cases side by side lose about
+// eight; picked by eye in the sheet, from none to a TV's worth.
+const GAP_DEFAULT = 8;
+const GAP_STEP = 2;
+const GAP_MAX = 40;
 // Two screens trading places in the grid. The screens themselves slide for
 // the same time, in viewer.js.
 const SWAP_MS = 420;
@@ -89,7 +101,7 @@ let shownCode = "";
 
 // Guest peer id -> { heard: last time anything arrived, images: ids it says
 // it holds, offered: ids sent to it and not yet confirmed, screen: its
-// screen id once it has said hello, aspect: its width over its height }.
+// screen id once it has said hello, size: { w, h } in millimetres }.
 const guests = new Map();
 let pumping = false;
 const prepared = new Map(); // image id -> Promise<{ mime, data }>
@@ -98,8 +110,13 @@ const prepared = new Map(); // image id -> Promise<{ mime, data }>
    and a screen's number is its place plus one. A screen that drops, or
    leaves, keeps its place so it comes back to the same piece of the card;
    only the presenter moves or removes one. `cols` is null until somebody
-   picks it, which puts every screen in one row. */
-const wall = { order: [], cols: null, identify: false };
+   picks it, which puts every screen in one row. `gap` is the bezels between
+   two screens, in millimetres, which the card runs on behind so a line
+   crossing from one screen to the next stays straight. */
+const wall = { order: [], cols: null, identify: false, gap: GAP_DEFAULT };
+// Screen id -> { w, h } in millimetres, kept after a screen drops, so the
+// rest do not move about while it comes back.
+const sizes = new Map();
 let picked = null; // the place tapped first, waiting for a second to swap with
 
 const el = {};
@@ -112,16 +129,26 @@ export function shareMode() {
 }
 
 /* What the presenter view draws over the card while it is a Big Screen, or
-   null: { cols, rows, aspect: one screen's width over its height,
-   screens: [{ number, online }] by place, identify }. */
+   null: { rows, aspect: the whole wall's width over its height, cells:
+   [{ number, online, blank, x, y, w, h }] with the place of each screen as
+   fractions of the wall, identify }. Blank cells are the places past the
+   last screen in a short bottom row. */
 export function bigScreen() {
   if (!host || shareMode() !== "bigscreen") return null;
-  const { cols, rows } = wallLayout();
+  const { rows } = wallLayout();
+  const geo = wallGeometry();
   return {
-    cols,
     rows,
-    aspect: screenAspect(),
-    screens: wall.order.map((screen, i) => ({ number: i + 1, online: isOnline(screen) })),
+    aspect: geo.width / geo.height,
+    cells: geo.cells.map((cell, i) => ({
+      number: i + 1,
+      online: i < wall.order.length && isOnline(wall.order[i]),
+      blank: i >= wall.order.length,
+      x: cell.left / geo.width,
+      y: cell.top / geo.height,
+      w: cell.w / geo.width,
+      h: cell.h / geo.height,
+    })),
     identify: wall.identify,
   };
 }
@@ -184,7 +211,7 @@ async function startHosting() {
     if (host !== h) return;
     // A new guest, or the same screen after a reload: either way it holds no
     // pictures until it says otherwise, and has no place until its hello.
-    guests.set(detail.id, { heard: Date.now(), images: new Set(), offered: new Set(), screen: null, aspect: null });
+    guests.set(detail.id, { heard: Date.now(), images: new Set(), offered: new Set(), screen: null, size: null });
   });
 
   h.addEventListener("leave", ({ detail }) => guests.delete(detail.id));
@@ -248,7 +275,7 @@ function onMessage(message, from) {
         return;
       }
       if (guest) {
-        guest.aspect = readAspect(message.w, message.h);
+        guest.size = readSize(message);
         claimScreen(guest, message.screen, from);
       }
       sendSnapshots(from);
@@ -256,8 +283,9 @@ function onMessage(message, from) {
       break;
     case "size":
       if (!guest) break;
-      guest.aspect = readAspect(message.w, message.h);
-      if (shareMode() === "bigscreen") changed();
+      guest.size = readSize(message);
+      if (guest.screen && guest.size) sizes.set(guest.screen, guest.size);
+      if (shareMode() === "bigscreen") wallChanged();
       break;
     case "imported":
       toast("The other device copied your cards.");
@@ -291,11 +319,16 @@ function dropGuest(id) {
   host.refreshStatus();
 }
 
-// Width over height, from a guest's own say-so, so kept to shapes a screen
-// can have.
-function readAspect(w, h) {
+/* A guest's screen in millimetres, from its own say-so: its size in CSS
+   pixels and its guess at how many of those make a millimetre. Kept to sizes
+   a screen can have. A guest from before the guess was sent is taken for a
+   phone, the usual case. */
+function readSize({ w, h, ppm }) {
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null;
-  return Math.min(Math.max(w / h, 0.25), 4);
+  const per = Number.isFinite(ppm) ? Math.min(Math.max(ppm, 2), 12) : 160 / 25.4;
+  const aspect = Math.min(Math.max(w / h, 0.25), 4);
+  const width = Math.min(Math.max(w / per, 20), 3000);
+  return { w: width, h: width / aspect };
 }
 
 /* ---- Big Screen ---- */
@@ -311,6 +344,7 @@ function claimScreen(guest, screen, from) {
     if (id !== from && other.screen === screen) dropGuest(id);
   }
   guest.screen = screen;
+  if (guest.size) sizes.set(screen, guest.size);
   if (shareMode() === "bigscreen") placeScreen(screen);
   changed();
 }
@@ -345,23 +379,83 @@ function wallLayout() {
   return { count, cols, rows: Math.ceil(count / cols) };
 }
 
-// The middle of what the connected screens say, so one odd screen does not
-// skew the presenter's picture of the rest.
-function screenAspect() {
-  const aspects = [...guests.values()]
-    .filter((g) => g.aspect && wall.order.includes(g.screen))
-    .map((g) => g.aspect)
-    .sort((a, b) => a - b);
-  return aspects.length ? aspects[Math.floor(aspects.length / 2)] : DEFAULT_ASPECT;
+// The middle of what the placed screens say, so one odd screen does not
+// skew the sheet's picture of the rest.
+function middleSize() {
+  const known = wall.order.map((screen) => sizes.get(screen)).filter(Boolean);
+  if (!known.length) return DEFAULT_SIZE;
+  const mid = (list) => list.sort((a, b) => a - b)[Math.floor(list.length / 2)];
+  return { w: mid(known.map((s) => s.w)), h: mid(known.map((s) => s.h)) };
 }
 
-// Where one screen sits, sent in its snapshot. Null for a screen with no
-// place, which draws the whole card rather than nothing.
+function screenAspect() {
+  if (!wall.order.some((screen) => sizes.has(screen))) return DEFAULT_ASPECT;
+  const { w, h } = middleSize();
+  return w / h;
+}
+
+/* The wall laid out in millimetres, so screens of different sizes each show
+   the piece of the card that is really in front of them. Every column is as
+   wide as its widest screen and every row as tall as its tallest, each
+   screen centred in its cell, with the bezels between cells. A blank place
+   in a short bottom row is given the usual size. Cells are { left, top, w,
+   h }, one for every place in the grid, screens first. */
+function wallGeometry() {
+  const { cols, rows } = wallLayout();
+  const usual = middleSize();
+  const sizeAt = (i) => (i < wall.order.length && sizes.get(wall.order[i])) || usual;
+
+  const colW = Array(cols).fill(0);
+  const rowH = Array(rows).fill(0);
+  for (let i = 0; i < cols * rows; i++) {
+    const { w, h } = sizeAt(i);
+    colW[i % cols] = Math.max(colW[i % cols], w);
+    rowH[Math.floor(i / cols)] = Math.max(rowH[Math.floor(i / cols)], h);
+  }
+
+  const offsets = (list) => list.map((_, i) => list.slice(0, i).reduce((a, b) => a + b, 0) + i * wall.gap);
+  const colX = offsets(colW);
+  const rowY = offsets(rowH);
+  const cells = Array.from({ length: cols * rows }, (_, i) => {
+    const { w, h } = sizeAt(i);
+    const c = i % cols;
+    const r = Math.floor(i / cols);
+    return { left: colX[c] + (colW[c] - w) / 2, top: rowY[r] + (rowH[r] - h) / 2, w, h };
+  });
+
+  return {
+    width: colX[cols - 1] + colW[cols - 1],
+    height: rowY[rows - 1] + rowH[rows - 1],
+    cells,
+  };
+}
+
+/* Where one screen sits, sent in its snapshot. Null for a screen with no
+   place, which draws the whole card rather than nothing. `box` is the whole
+   wall measured in this screen: where it starts and how big it is, in
+   widths and heights of this screen. */
 function wallTile(screen) {
   const i = wall.order.indexOf(screen);
   if (i < 0) return null;
   const { count, cols, rows } = wallLayout();
-  return { n: i + 1, of: count, col: i % cols, row: Math.floor(i / cols), cols, rows, identify: wall.identify };
+  const geo = wallGeometry();
+  const cell = geo.cells[i];
+  const round = (n) => Math.round(n * 10000) / 10000;
+  return {
+    n: i + 1,
+    of: count,
+    col: i % cols,
+    row: Math.floor(i / cols),
+    cols,
+    rows,
+    identify: wall.identify,
+    box: {
+      x: round(-cell.left / cell.w),
+      y: round(-cell.top / cell.h),
+      w: round(geo.width / cell.w),
+      h: round(geo.height / cell.h),
+    },
+  };
 }
 
 function loadWall() {
@@ -370,11 +464,14 @@ function loadWall() {
     .slice(0, MAX_SCREENS);
   const cols = Number.parseInt(readSetting("wallCols"), 10);
   wall.cols = cols >= 1 && cols <= MAX_SCREENS ? cols : null;
+  const gap = Number.parseInt(readSetting("wallGap"), 10);
+  wall.gap = gap >= 0 && gap <= GAP_MAX ? gap : GAP_DEFAULT;
 }
 
 function saveWall() {
   writeSetting("wallOrder", wall.order.length ? wall.order.join(",") : null);
   writeSetting("wallCols", wall.cols);
+  writeSetting("wallGap", wall.gap);
 }
 
 function clearWall() {
@@ -439,6 +536,11 @@ function snapshot(screen) {
     theme: { color: root.getAttribute("data-color-theme"), mode: root.getAttribute("data-mode") },
   };
   if (mode === "bigscreen" && screen) message.wall = wallTile(screen);
+  // The shape the card is seen in here, so a screen of another shape draws
+  // the same picture inside its own rather than cropping it: this screen's
+  // own under Mirror, the editor's card under Extend.
+  else if (mode === "mirror") message.shape = Math.round((window.innerWidth / window.innerHeight) * 1000) / 1000;
+  else if (mode === "extend") message.shape = CARD_ASPECT;
 
   // Nothing about the card until play is pressed: the other screen waits,
   // and what is being edited stays on this one. Sending shows nothing at
@@ -748,6 +850,10 @@ function renderWall() {
   el.wallFewer.disabled = cols <= 1;
   el.wallMore.disabled = cols >= count;
 
+  el.wallGap.textContent = wall.gap ? `Bezels ${wall.gap} mm` : "No bezels";
+  el.wallGapLess.disabled = wall.gap <= 0;
+  el.wallGapMore.disabled = wall.gap >= GAP_MAX;
+
   el.wallIdentify.setAttribute("aria-pressed", String(wall.identify));
   el.wallIdentify.classList.toggle("btn-primary", wall.identify);
   el.wallIdentifyLabel.textContent = wall.identify ? "Hide numbers" : "Show numbers";
@@ -802,6 +908,16 @@ function wireWall() {
   });
   el.wallMore.addEventListener("click", () => {
     wall.cols = Math.min(wallLayout().count, wallLayout().cols + 1);
+    wallChanged();
+  });
+
+  // By eye: a line drawn across two screens should come out straight.
+  el.wallGapLess.addEventListener("click", () => {
+    wall.gap = Math.max(0, wall.gap - GAP_STEP);
+    wallChanged();
+  });
+  el.wallGapMore.addEventListener("click", () => {
+    wall.gap = Math.min(GAP_MAX, wall.gap + GAP_STEP);
     wallChanged();
   });
 
@@ -921,6 +1037,9 @@ export function initShare({ getFrame }) {
   el.wallFewer = document.getElementById("wallFewer");
   el.wallCols = document.getElementById("wallCols");
   el.wallMore = document.getElementById("wallMore");
+  el.wallGapLess = document.getElementById("wallGapLess");
+  el.wallGap = document.getElementById("wallGap");
+  el.wallGapMore = document.getElementById("wallGapMore");
   el.wallIdentify = document.getElementById("wallIdentify");
   el.wallIdentifyLabel = document.getElementById("wallIdentifyLabel");
   el.wallForget = document.getElementById("wallForget");

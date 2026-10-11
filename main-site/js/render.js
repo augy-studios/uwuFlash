@@ -127,7 +127,10 @@ export async function renderCard(card, target, { presenting = false, resolveImag
             : textLayerHtml(layer)
         )
         .join("");
-      return `<div class="card-slot slot-${slot.kind}">${inner}</div>`;
+      // Pictures set to fill their space run out to the card's edges rather
+      // than sitting inside its margin, which framed them in a border.
+      const bleed = slot.kind === "image" && slot.layers.every((l) => l.fit === "cover" && urls.get(l.id));
+      return `<div class="card-slot slot-${slot.kind}${bleed ? " bleed" : ""}">${inner}</div>`;
     })
     .join("");
 

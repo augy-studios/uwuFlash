@@ -165,7 +165,8 @@
   align-items: center;
   justify-content: center;
   gap: 3cqw;
-  padding: 4cqw;
+  --pad: 4cqw;
+  padding: var(--pad);
   overflow: hidden;
 }
 
@@ -225,6 +226,29 @@
 }
 .card-image.fit-contain { object-fit: contain; }
 .card-image.fit-cover { object-fit: cover; }
+
+/* Fill the space: the picture runs out through the card's margin to every
+   edge it sits against, square cornered, so it is not framed in a border of
+   the card's colour. Edges with words beside them keep the margin. */
+.slot-image.bleed .card-image { border-radius: 0; }
+.layout-image-center > .slot-image.bleed,
+.layout-image-between > .slot-image.bleed {
+  width: calc(100% + 2 * var(--pad));
+  margin-inline: calc(-1 * var(--pad));
+}
+.layout-image-left > .slot-image.bleed,
+.layout-image-right > .slot-image.bleed {
+  height: calc(100% + 2 * var(--pad));
+  margin-block: calc(-1 * var(--pad));
+}
+.layout-image-left > .slot-image.bleed { margin-left: calc(-1 * var(--pad)); }
+.layout-image-right > .slot-image.bleed { margin-right: calc(-1 * var(--pad)); }
+.layout-image-center > .slot-image.bleed:first-child,
+.layout-image-between > .slot-image.bleed:first-child { margin-top: calc(-1 * var(--pad)); }
+.layout-image-center > .slot-image.bleed:last-child,
+.layout-image-between > .slot-image.bleed:last-child { margin-bottom: calc(-1 * var(--pad)); }
+.layout-image-left > .slot-image.bleed:only-child { margin-right: calc(-1 * var(--pad)); }
+.layout-image-right > .slot-image.bleed:only-child { margin-left: calc(-1 * var(--pad)); }
 
 .card-empty,
 .card-image-missing {
@@ -572,7 +596,7 @@ body.presenting { overflow: hidden; }
   position: absolute;
   inset: 0;
   z-index: 1;
-  padding: 5cqw;
+  --pad: 5cqw;
 }
 
 /* Presenter view, while sharing in extend mode. The other screen has the
@@ -619,12 +643,12 @@ body.presenting { overflow: hidden; }
 .remote-grid {
   position: absolute;
   inset: 0;
-  display: grid;
-  grid-template-columns: repeat(var(--cols, 1), 1fr);
-  grid-template-rows: repeat(var(--rows, 1), 1fr);
   pointer-events: none;
 }
+/* Placed by app.js where each screen really is. What falls between them is
+   the card behind the bezels, which no screen shows. */
 .remote-cell {
+  position: absolute;
   display: flex;
   align-items: flex-start;
   justify-content: flex-start;
@@ -757,7 +781,7 @@ body.presenting { overflow: hidden; }
   gap: 10px;
 }
 .wall-cols {
-  min-width: 6.5em;
+  min-width: 7.5em;
   text-align: center;
   font-size: 0.88rem;
   color: var(--ink);
@@ -816,21 +840,32 @@ body.presenting { overflow: hidden; }
 
 body.viewing { overflow: hidden; }
 
-/* One screen's worth by default. On a Big Screen it is every screen's worth,
-   pulled up and left by this screen's place so its own piece is the part
-   inside the viewer. Its own container, so the card's sizes are against the
-   whole of it and match from one screen to the next. */
+/* Where viewer.js says, as fractions of the screen. Alone, the card in the
+   other device's shape, inside the part of the screen clear of the notch and
+   rounded corners. On a Big Screen, the whole wall, pulled up and left so
+   this screen's own piece is the part inside the viewer. Its own container,
+   so the card's sizes are against the whole of it and match from one screen
+   to the next. */
 .viewer-wall {
   position: absolute;
-  left: calc(var(--col, 0) * -100%);
-  top: calc(var(--row, 0) * -100%);
-  width: calc(var(--cols, 1) * 100%);
-  height: calc(var(--rows, 1) * 100%);
+  left: calc(var(--x, 0) * 100%);
+  top: calc(var(--y, 0) * 100%);
+  width: calc(var(--w, 1) * 100%);
+  height: calc(var(--h, 1) * 100%);
   container-type: size;
+}
+
+/* Never seen: measured by viewer.js for the screen's safe area. */
+.viewer-safe {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
 }
 .viewer:not(.showing) .viewer-wall { display: none; }
 
-#viewerCanvas { padding: 5cqw; }
+#viewerCanvas { --pad: 5cqw; }
 
 /* This screen's number, big enough to read from where the screens are being
    arranged, over the card if one is showing. */
