@@ -134,6 +134,8 @@ export async function renderCard(card, target, { presenting = false, resolveImag
     })
     .join("");
 
-  target.className = `card-canvas layout-${card.layout}${presenting ? " presenting" : ""}${fill ? " filled" : ""}`;
+  target.className = `card-canvas layout-${card.layout}${presenting ? " presenting" : ""}${fill ? " filled" : ""}${
+    card.wrap === false ? " nowrap" : ""
+  }`;
   target.innerHTML = background + (html || (fill ? "" : '<div class="card-empty">This card is empty</div>'));
 }

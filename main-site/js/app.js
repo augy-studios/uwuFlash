@@ -372,6 +372,12 @@ function renderTickerPanel() {
   el.cardTicker.classList.toggle("btn-primary", on);
   el.cardTickerLabel.textContent = on ? "Ticker on" : "Ticker off";
   el.tickerSpeed.hidden = !on;
+  const wrap = card.wrap !== false;
+  el.wrapRow.hidden = on;
+  el.wrapNote.hidden = on;
+  el.cardWrap.setAttribute("aria-pressed", String(wrap));
+  el.cardWrap.classList.toggle("btn-primary", wrap);
+  el.cardWrapLabel.textContent = wrap ? "Wrapping on" : "Wrapping off";
   const speed = readTickerSpeed(card.tickerSpeed);
   el.tickerSpeed.querySelectorAll("[data-ticker-speed]").forEach((btn) => {
     const active = btn.dataset.tickerSpeed === speed;
@@ -894,6 +900,12 @@ function wireEditor() {
     setTicker(currentCard(), !currentCard().ticker);
     renderTickerPanel();
   });
+  el.cardWrap.addEventListener("click", () => {
+    currentCard().wrap = currentCard().wrap === false;
+    renderTickerPanel();
+    renderPreview();
+    persist();
+  });
   el.tickerSpeed.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-ticker-speed]");
     if (!btn || !TICKER_SPEED_IDS.includes(btn.dataset.tickerSpeed)) return;
@@ -1003,6 +1015,10 @@ function boot() {
   el.cardTicker = document.getElementById("cardTicker");
   el.cardTickerLabel = document.getElementById("cardTickerLabel");
   el.tickerSpeed = document.getElementById("tickerSpeed");
+  el.wrapRow = document.getElementById("wrapRow");
+  el.wrapNote = document.getElementById("wrapNote");
+  el.cardWrap = document.getElementById("cardWrap");
+  el.cardWrapLabel = document.getElementById("cardWrapLabel");
   el.remoteNow = document.getElementById("remoteNow");
   el.remoteNext = document.getElementById("remoteNext");
   el.remoteStatus = document.getElementById("remoteStatus");

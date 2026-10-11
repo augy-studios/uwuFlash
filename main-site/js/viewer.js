@@ -456,6 +456,7 @@ function readCard(card) {
     layers,
     ticker: card.ticker === true,
     tickerSpeed: readTickerSpeed(card.tickerSpeed),
+    wrap: card.wrap !== false,
   };
 }
 

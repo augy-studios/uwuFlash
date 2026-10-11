@@ -673,6 +673,7 @@ function wireCard(card) {
   const filling = fillImage(card);
   return {
     layout: card.layout,
+    wrap: card.wrap !== false,
     layers: card.layers
       .filter((layer) => !layer.hidden)
       .map((layer) =>
@@ -708,6 +709,7 @@ function wireDeckCard(card) {
     ),
     ticker: card.ticker === true,
     tickerSpeed: card.tickerSpeed,
+    wrap: card.wrap !== false,
   };
 }
 
