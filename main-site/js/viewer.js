@@ -11,7 +11,12 @@
    On a Big Screen this is one of several screens showing one card. The host
    says where it sits in the grid, and it draws the whole card at the size of
    the whole grid with only its own piece inside the screen. Asked to, it
-   shows its number over everything, so the screens can be put in order.
+   shows its number over everything, so the screens can be put in order, or
+   lines across the whole wall, so the bezels between them can be set.
+
+   With the host's ticker on, the card's words roll along one line instead,
+   timed by the host's clock so that every screen of a Big Screen has the
+   line in the same place and it runs straight on from one to the next.
 
    The one exception is a host that picked Send. Then nothing is shown, and
    the host's whole deck arrives instead, pictures and all, with a choice to
@@ -24,6 +29,7 @@
 
 import { Guest, normaliseCode, isValidCode, MAX_SHARED_IMAGES, MAX_SCREENS } from "./p2p.js";
 import { renderCard } from "./render.js";
+import { renderTicker, hasTickerText, TICKER_SPEEDS } from "./ticker.js";
 import { LAYOUTS, DEFAULT_LAYOUT, TEXT_SIZES, readFocus } from "./deck.js";
 import { COLOR_THEMES, initTheme, showColorTheme } from "./theme.js";
 import { readSetting, writeSetting } from "./store.js";
@@ -46,6 +52,9 @@ const SWAP_MS = 420;
 // A screen this close to the card's shape fills itself with the card,
 // cropping a sliver, rather than showing thin bars down two sides.
 const SHAPE_SLACK = 0.12;
+// The host's clock is read off each snapshot. The one that took least time
+// to arrive is the truest, so the best of the last few seconds is kept.
+const CLOCK_WINDOW_MS = 5000;
 
 const MAX_IMAGES = 40;
 const MAX_INCOMING = 4;
@@ -75,6 +84,7 @@ let code = "";
 let status = "idle";
 let failure = "";
 let ended = false;
+let removed = false;
 let outdated = false;
 let full = false;
 let screenId = "";
@@ -99,6 +109,9 @@ let shownKey = "";
 let waitKey = "";
 let waitSince = 0;
 
+// Host clock minus this one's, from snapshots: [{ at, offset }], newest last.
+let clockSamples = [];
+
 // A deck the host is sending: { cards, imageIds, blobs: id -> Blob,
 // missing: ids the host could not read }. Its pictures are kept apart from
 // `images`, which evicts, so a deck with many pictures arrives whole.
@@ -119,10 +132,12 @@ export function startViewing(input) {
   writeSetting("shareRole", "guest");
 
   ended = false;
+  removed = false;
   outdated = false;
   resuming = false;
   retryDelay = RETRY_FIRST_MS;
   state = null;
+  clockSamples = [];
   showNothing();
   openViewer();
   join();
@@ -255,6 +270,7 @@ function onMessage(message) {
 
       state = next;
       lastStateAt = Date.now();
+      if (Number.isFinite(message.clock)) noteClock(message.clock);
       // The host went back to showing cards. Its deck is no longer on offer.
       if (state.mode !== "send" && offer) dropOffer();
       wearTheme(state.theme);
@@ -275,10 +291,12 @@ function onMessage(message) {
     case "noimage":
       if (typeof message.id === "string" && offer?.imageIds.has(message.id)) offer.missing.add(message.id);
       break;
+    case "removed":
     case "end":
-      // The host stopped on purpose. Its code is gone, so there is nothing
-      // to come back to.
+      // The host stopped on purpose, or let this screen go. Either way there
+      // is nothing to come back to.
       ended = true;
+      removed = message.type === "removed";
       state = null;
       dropOffer();
       clearTimeout(retryTimer);
@@ -327,7 +345,9 @@ function readState(message) {
   const card = mode === "show" && message.presenting === true ? readCard(message.card) : null;
   const wall = mode === "show" ? readWall(message.wall) : null;
   const shape = Number.isFinite(message.shape) ? Math.min(Math.max(message.shape, 0.25), 4) : null;
-  return { mode, presenting: card !== null, card, theme, wall, shape };
+  const ticker =
+    card && message.ticker && Object.hasOwn(TICKER_SPEEDS, message.ticker.speed) ? { speed: message.ticker.speed } : null;
+  return { mode, presenting: card !== null, card, theme, wall, shape, ticker };
 }
 
 /* Where this screen sits in a Big Screen, or null for the whole card. Every
@@ -344,7 +364,12 @@ function readWall(wall) {
   ) {
     return null;
   }
-  return { n, of, col, row, cols, rows, identify: wall.identify === true, box: readBox(wall.box, wall) };
+  return {
+    n, of, col, row, cols, rows,
+    identify: wall.identify === true,
+    lines: wall.lines === true,
+    box: readBox(wall.box, wall),
+  };
 }
 
 // The whole wall measured in this screen. Without one, from a host before
@@ -504,6 +529,21 @@ function touchImages(card) {
   });
 }
 
+/* ---- the host's clock ---- */
+
+function noteClock(hostClock) {
+  const at = Date.now();
+  clockSamples.push({ at, offset: hostClock - at });
+  while (clockSamples.length > 1 && at - clockSamples[0].at > CLOCK_WINDOW_MS) clockSamples.shift();
+}
+
+// Now, by the host's clock. A snapshot is late by however long it took to
+// arrive, so the largest offset seen lately is the closest to the truth.
+function hostNow() {
+  const offset = clockSamples.reduce((best, s) => Math.max(best, s.offset), -Infinity);
+  return Date.now() + (Number.isFinite(offset) ? offset : 0);
+}
+
 /* ---- drawing ---- */
 
 function wearTheme({ color, mode }) {
@@ -571,14 +611,17 @@ function placeStage() {
 
 function apply() {
   placeStage();
+  el.viewer.classList.toggle("lining", !!(state?.wall?.lines && status === "connected" && !ended));
   const card = state?.presenting ? state.card : null;
   if (!card) {
     if (shownKey) showNothing();
     return;
   }
 
-  const cardKey = JSON.stringify(card);
-  const imageLayers = card.layers.filter((l) => l.type === "image");
+  const ticker = state.ticker && hasTickerText(card) ? state.ticker : null;
+  const cardKey = JSON.stringify([card, ticker]);
+  // A ticker only draws a picture that fills the card.
+  const imageLayers = card.layers.filter((l) => l.type === "image" && (!ticker || l.fill));
   const ready = imageLayers.filter((l) => images.has(l.imageId)).length;
 
   // The pictures that have arrived are part of the key, so one landing
@@ -596,10 +639,9 @@ function apply() {
 
   shownKey = key;
   touchImages(card);
-  renderCard(card, el.canvas, {
-    presenting: true,
-    resolveImage: (id) => images.get(id) ?? null,
-  });
+  const resolveImage = (id) => images.get(id) ?? null;
+  if (ticker) renderTicker(card, el.canvas, { resolveImage, now: hostNow, speed: ticker.speed });
+  else renderCard(card, el.canvas, { presenting: true, resolveImage });
   el.viewer.classList.add("showing");
 }
 
@@ -624,7 +666,7 @@ function placeMove(before, after) {
 // is going on.
 function frontLayer() {
   if (!el.number.hidden) return el.number;
-  if (el.viewer.classList.contains("showing")) return el.wall;
+  if (el.viewer.classList.contains("showing") || el.viewer.classList.contains("lining")) return el.wall;
   return el.panel;
 }
 
@@ -674,8 +716,8 @@ function renderPanel() {
   let badge = "";
 
   if (ended) {
-    title = "Sharing ended";
-    message = "The other device stopped sharing.";
+    title = removed ? "Removed" : "Sharing ended";
+    message = removed ? "The other device removed this screen." : "The other device stopped sharing.";
   } else if (outdated) {
     title = "Different versions";
     message = "These two devices are running different versions of uwuFlash. Reload the page on both.";
@@ -858,12 +900,15 @@ export function leaveViewer() {
   incoming.clear();
   dropOffer();
   state = null;
+  clockSamples = [];
   status = "idle";
   ended = false;
+  removed = false;
   outdated = false;
   full = false;
   clearTimeout(resizeTimer);
   showNothing();
+  el.viewer.classList.remove("lining");
 
   open = false;
   el.viewer.classList.add("hidden");

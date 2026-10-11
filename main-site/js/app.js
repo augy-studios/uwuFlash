@@ -9,7 +9,7 @@ import {
 } from "./theme.js";
 import { hydrateIcons, openModal, closeModal, escapeHtml, toast } from "./ui.js";
 import { initUpdateBar } from "./update.js";
-import { loadDeck, saveDeck, putImage, forgetImageUrl, pruneImages } from "./store.js";
+import { loadDeck, saveDeck, putImage, forgetImageUrl, pruneImages, imageUrl } from "./store.js";
 import {
   LAYOUTS,
   TEXT_SIZES,
@@ -26,7 +26,17 @@ import {
   fillImage,
 } from "./deck.js";
 import { renderCard } from "./render.js";
-import { initShare, isHosting, hostStatus, shareMode, shareNow, shareDeckChanged, bigScreen } from "./share.js";
+import { renderTicker, hasTickerText } from "./ticker.js";
+import {
+  initShare,
+  isHosting,
+  hostStatus,
+  shareMode,
+  shareNow,
+  shareDeckChanged,
+  shareTicker,
+  bigScreen,
+} from "./share.js";
 import { initViewer } from "./viewer.js";
 
 /* ---- state ---- */
@@ -581,7 +591,7 @@ async function showPresentCard() {
   shareNow();
 
   if (!remote) {
-    await renderCard(currentCard(), el.presentCanvas, { presenting: true });
+    await drawShown(currentCard(), el.presentCanvas);
     return;
   }
 
@@ -602,9 +612,20 @@ async function showPresentCard() {
     el.remoteNext.innerHTML = '<div class="card-empty">End of the cards</div>';
   }
   await Promise.all([
-    renderCard(currentCard(), el.remoteNow, { presenting: true }),
+    drawShown(currentCard(), el.remoteNow),
     next ? renderCard(next, el.remoteNext, { presenting: true }) : null,
   ]);
+}
+
+/* The card as the other screens show it: as a ticker while sharing with the
+   ticker on, so what is seen here is what they show. The next card stays a
+   card, to read ahead. */
+function drawShown(card, target) {
+  const ticker = shareTicker();
+  if (ticker && hasTickerText(card)) {
+    return renderTicker(card, target, { resolveImage: imageUrl, speed: ticker.speed });
+  }
+  return renderCard(card, target, { presenting: true });
 }
 
 /* The frames take the shape of the whole Big Screen, bezels and all, so

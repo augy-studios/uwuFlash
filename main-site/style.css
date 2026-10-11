@@ -670,6 +670,34 @@ body.presenting { overflow: hidden; }
   background: color-mix(in srgb, var(--card-bg) 70%, transparent);
 }
 
+/* ---- ticker ----
+
+   A card's words on one line, rolling. ticker.js moves the track; the line
+   sits across the middle of the card in the card's own box, so on a Big
+   Screen it is as tall as the wall says and runs across every screen. */
+.ticker-canvas { padding: 0; }
+.ticker {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  line-height: 1.2;
+  user-select: none;
+}
+.ticker.size-s { font-size: 16cqh; }
+.ticker.size-m { font-size: 24cqh; }
+.ticker.size-l { font-size: 34cqh; }
+.ticker.size-xl { font-size: 48cqh; }
+.ticker-track {
+  display: flex;
+  width: max-content;
+  will-change: transform;
+}
+.ticker-run { white-space: pre; }
+.card-canvas.filled .ticker {
+  text-shadow: 0 0 0.25em var(--card-bg), 0 0 0.6em var(--card-bg);
+}
+
 /* ---- share sheet ---- */
 
 .icon-btn.live {
@@ -729,35 +757,40 @@ body.presenting { overflow: hidden; }
   user-select: text;
 }
 
-/* Big Screen: the screens by place, each the shape the screens say they
-   are. share.js narrows it as the grid gets taller. */
+/* Big Screen: the screens by place, drawn where they are on the wall with
+   the bezels between them to scale. share.js places every tile and seam,
+   and narrows the map as the wall gets taller. */
 .wall {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 .wall-map {
-  display: grid;
-  grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr));
-  gap: 6px;
+  position: relative;
   width: min(100%, var(--map-width, 340px));
-  margin: 0 auto;
+  aspect-ratio: var(--aspect, 1.6);
+  margin: 6px auto;
+  touch-action: none;
 }
 .wall-tile {
-  position: relative;
-  aspect-ratio: var(--aspect, 1.6);
+  position: absolute;
+  border-radius: 6px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface-strong);
+  color: var(--ink);
+  transition: background 0.15s ease;
+}
+.wall-pick {
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  border-radius: 8px;
-  border: 1px solid var(--surface-border);
-  background: var(--surface-strong);
-  color: var(--ink);
-  transition: background 0.15s ease, transform 0.15s ease;
+  border-radius: inherit;
+  color: inherit;
 }
-.wall-tile:hover { transform: translateY(-1px); }
 .wall-tile.picked {
   background: var(--brand-fill);
   color: var(--on-brand);
@@ -773,6 +806,79 @@ body.presenting { overflow: hidden; }
 }
 .wall-map.identifying .wall-num { font-size: 1.9rem; }
 .wall-off { font-size: 0.65rem; }
+.wall-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: inherit;
+  opacity: 0.6;
+}
+.wall-remove:hover,
+.wall-remove:focus-visible {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+.wall-remove svg { width: 14px; height: 14px; }
+
+/* A seam between two columns or two rows: a line down the middle of the
+   bezels, in a strip wide enough to take a finger even with no bezels. */
+.wall-seam {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  outline: none;
+}
+.wall-seam.x {
+  top: -6px;
+  bottom: -6px;
+  width: 24px;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+}
+.wall-seam.y {
+  left: -6px;
+  right: -6px;
+  height: 24px;
+  transform: translateY(-50%);
+  cursor: ns-resize;
+}
+.wall-seam::before {
+  content: "";
+  position: absolute;
+  border-radius: 2px;
+  background: var(--brand-ink);
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+.wall-seam.x::before { top: 0; bottom: 0; width: 3px; }
+.wall-seam.y::before { left: 0; right: 0; height: 3px; }
+.wall-seam:hover::before,
+.wall-seam:focus-visible::before,
+.wall-seam.dragging::before { opacity: 1; }
+.wall-seam-value {
+  position: relative;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  background: var(--brand-fill);
+  color: var(--on-brand);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+.wall-seam:hover .wall-seam-value,
+.wall-seam:focus-visible .wall-seam-value,
+.wall-seam.dragging .wall-seam-value { opacity: 1; }
 
 .wall-row {
   display: flex;
@@ -787,6 +893,44 @@ body.presenting { overflow: hidden; }
   color: var(--ink);
 }
 .wall-actions { justify-content: center; }
+
+/* Mirror, Extend and Send: the device that has joined, with a way to let it
+   go. */
+.share-guests {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+.share-guest {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 6px 6px 12px;
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 0.88rem;
+  color: var(--ink);
+}
+.share-guest-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand-ink);
+  flex: none;
+}
+.share-guest-name { flex: 1 1 auto; min-width: 0; }
+.share-guest .btn svg { width: 16px; height: 16px; }
+
+.ticker-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.ticker-row .seg { flex: 1 1 200px; }
 
 .join-row {
   display: flex;
@@ -863,7 +1007,28 @@ body.viewing { overflow: hidden; }
   padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
     env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
 }
-.viewer:not(.showing) .viewer-wall { display: none; }
+.viewer:not(.showing):not(.lining) .viewer-wall { display: none; }
+.viewer.lining .viewer-panel { display: none; }
+
+/* For setting the bezels: a lattice of diagonal lines and a cross through
+   the middle, drawn across the whole wall. Where a line bends crossing from
+   one screen to the next, the bezels between them are set wrong. Sized
+   against the wall, so it is the same lattice on every screen. */
+.viewer-lines {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  --line: color-mix(in srgb, var(--card-ink) 85%, transparent);
+  background:
+    linear-gradient(var(--line), var(--line)) center / 100% 1cqh no-repeat,
+    linear-gradient(var(--line), var(--line)) center / 1cqh 100% no-repeat,
+    repeating-linear-gradient(45deg, transparent 0 9cqh, var(--line) 9cqh 10cqh),
+    repeating-linear-gradient(-45deg, transparent 0 9cqh, var(--line) 9cqh 10cqh);
+}
+.viewer.lining .viewer-lines { display: block; }
+.viewer.lining:not(.showing) #viewerCanvas { display: none; }
 
 #viewerCanvas { --pad: 5cqw; }
 

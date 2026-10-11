@@ -16,7 +16,7 @@
    update bar, which posts the message handled at the bottom of this file.
    See update-bar-spec.md at the repo root. */
 
-const VERSION = 10;
+const VERSION = 11;
 const CACHE = `uwuFlash-${VERSION}`;
 
 /* Everything the app needs to start with no network at all. The editor, the
@@ -37,6 +37,7 @@ const ASSETS = [
   "/js/store.js",
   "/js/deck.js",
   "/js/render.js",
+  "/js/ticker.js",
   // Sharing. These modules are precached so the app and its share sheet
   // open offline; PeerJS and the QR encoder they load are deliberately not,
   // since sharing needs the network anyway and a stale signalling client

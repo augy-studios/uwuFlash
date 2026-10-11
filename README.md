@@ -51,9 +51,18 @@ they show one card, each its own piece, like a video wall. **Show numbers**
 puts each screen's number on it and on the grid in your share sheet at the same
 time, so you can see which is which; tap two in the grid to swap them, and set
 how many sit across. Screens of different sizes are lined up by how big they
-really are, and **Bezels** sets how much of the card hides behind the edges
-between two screens, so a line crossing from one to the next stays straight.
-A screen that drops out comes back to the same place.
+really are. The bezels between two screens hide part of the card, so a line
+crossing from one to the next stays straight: drag the line between any two
+screens in the grid, a tenth of a millimetre at a time, while **Show lines**
+draws a lattice across every screen to judge it by, words and pictures alike.
+Each seam keeps its own width. A screen that drops out for a moment comes back
+to the same place; one gone for longer than a few seconds is let go, and the
+**x** on a screen removes it at any time.
+
+**Run the words as a ticker.** With **Ticker** on, the words of the card being
+shown run together on one line that rolls round and round like a news ticker,
+at a speed you pick. On a Big Screen it runs straight on from one screen to the
+next.
 
 **Send your cards to another device.** The same sharing, with **Send cards**
 picked instead, copies your whole deck, pictures included, to the other
@@ -81,8 +90,11 @@ open full screen like an app.
   **Be the other device** on it). Then press play.
 - For **Big Screen**, join from every screen the same way. Line them up, press
   **Show numbers**, and swap screens in the grid until it matches the table.
-  Then nudge **Bezels** until a line across two screens comes out straight.
+  Then press **Show lines** and drag the line between each pair of screens in
+  the grid until the lines on them meet straight.
   Screens of one model line up best; mixed ones go by a guess at their size.
+- The device that joined is listed in the share sheet, with **Remove** to let
+  it go.
 - To copy your cards to another device, choose **Send cards** instead and join
   the same way. Once the pictures have arrived, the other device picks **Add
   to my cards** or **Replace my cards** (which needs a second tap).
