@@ -63,9 +63,12 @@ to the same place; one gone for longer than a few seconds is let go, and the
 the card in the editor or on the ticker button while presenting (or press
 **T**). With it on, that card's words run together on one line that rolls
 round and round like a news ticker, at a speed you pick for the card. On a Big
-Screen it runs straight on from one screen to the next. With it off, a Big
-Screen gives the words the width of every screen together, so a line that
-would wrap on one screen runs straight across two or more when it fits.
+Screen it runs straight on from one screen to the next. With it off, the words
+are the same size as on the ticker, so switching never resizes them, and a Big
+Screen gives them the width of every screen together: a line that would wrap
+on one screen runs straight across two or more when it fits. Turn a card's
+**Wrapping** off to keep each line on one line however long, running off the
+edges rather than breaking.
 
 **Send your cards to another device.** The same sharing, with **Send cards**
 picked instead, copies your whole deck, pictures included, to the other

@@ -112,6 +112,13 @@
                 </div>
             </div>
             <p class="mode-note">With the ticker on, this card's words roll along one line, round and round, like a news ticker, when it is shown.</p>
+            <!-- Only while the ticker is off: a ticker never wraps. -->
+            <div class="ticker-row" id="wrapRow">
+                <button class="btn" id="cardWrap" type="button" aria-pressed="true">
+                    <span data-icon="text"></span><span id="cardWrapLabel">Wrapping on</span>
+                </button>
+            </div>
+            <p class="mode-note" id="wrapNote">With wrapping off, each line of this card's words stays on one line, however long, rather than breaking to fit.</p>
         </section>
 
         <section class="panel glass">

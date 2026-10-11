@@ -205,27 +205,35 @@
 .card-text.align-right { text-align: right; }
 
 /* Sized against the card, not the viewport, so the editor preview and the
-   fullscreen presenter render identically at different sizes. */
-.card-text.size-s { font-size: 5cqw; }
-.card-text.size-m { font-size: 8cqw; }
-.card-text.size-l { font-size: 12cqw; }
-.card-text.size-xl { font-size: 18cqw; }
+   fullscreen presenter render identically at different sizes. Against its
+   height, the same sizes as the ticker's, so turning a card's ticker on or
+   off keeps its words the size they were. On a Big Screen, as wide as every
+   screen together, that leaves the extra width to the line: words that wrap
+   on one screen run straight across two or more when they fit. */
+.card-text.size-s { font-size: 16cqh; }
+.card-text.size-m { font-size: 24cqh; }
+.card-text.size-l { font-size: 34cqh; }
+.card-text.size-xl { font-size: 48cqh; }
 
-/* On a Big Screen the card is as wide as every screen together, so sizing
-   the words against its width would only make them bigger and wrap them in
-   the same places as on one screen. Past the editor's 16:10 they are sized
-   against its height instead, the same size as the card is tall as in the
-   editor, and the spare width goes to the line: words that wrap on one
-   screen run straight across two or more when they fit. A wall narrower
-   than 16:10 sizes them as before. */
+/* A card with wrapping off keeps each line of its words on one line however
+   long, overhanging the card's edges rather than breaking. Centred words
+   overhang both edges evenly. */
+.card-canvas.nowrap .card-text {
+  width: max-content;
+  max-width: none;
+  white-space: pre;
+  word-break: normal;
+  flex: none;
+}
+.card-canvas.nowrap .card-text.align-left { align-self: flex-start; }
+.card-canvas.nowrap .card-text.align-right { align-self: flex-end; }
+
+/* On a Big Screen the card is as wide as every screen together, so the
+   margins, sized against its width, would grow with every screen added. */
 .on-wall .card-canvas {
   gap: min(3cqw, 4.8cqh);
   --pad: min(5cqw, 8cqh);
 }
-.on-wall .card-text.size-s { font-size: min(5cqw, 8cqh); }
-.on-wall .card-text.size-m { font-size: min(8cqw, 12.8cqh); }
-.on-wall .card-text.size-l { font-size: min(12cqw, 19.2cqh); }
-.on-wall .card-text.size-xl { font-size: min(18cqw, 28.8cqh); }
 
 .card-text-empty {
   opacity: 0.45;
@@ -709,6 +717,7 @@ body.presenting { overflow: hidden; }
   line-height: 1.2;
   user-select: none;
 }
+/* The same sizes as .card-text's. */
 .ticker.size-s { font-size: 16cqh; }
 .ticker.size-m { font-size: 24cqh; }
 .ticker.size-l { font-size: 34cqh; }

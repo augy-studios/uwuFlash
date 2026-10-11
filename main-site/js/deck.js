@@ -30,6 +30,10 @@ export function readTickerSpeed(speed) {
   return TICKER_SPEED_IDS.includes(speed) ? speed : DEFAULT_TICKER_SPEED;
 }
 
+/* Wrapping off keeps each line of a card's words on one line, however long,
+   rather than breaking it to fit the card. */
+export const DEFAULT_WRAP = true;
+
 export const TEXT_SIZES = [
   { id: "s", label: "Small" },
   { id: "m", label: "Medium" },
@@ -79,6 +83,7 @@ export function makeCard(text = "") {
     layers: [makeTextLayer(text)],
     ticker: false,
     tickerSpeed: DEFAULT_TICKER_SPEED,
+    wrap: DEFAULT_WRAP,
   };
 }
 
@@ -97,6 +102,7 @@ export function normaliseDeck(raw) {
     layers: Array.isArray(card?.layers) ? card.layers.map(normaliseLayer).filter(Boolean) : [],
     ticker: card?.ticker === true,
     tickerSpeed: readTickerSpeed(card?.tickerSpeed),
+    wrap: card?.wrap !== false,
   }));
 
   return { version: 1, cards };
