@@ -172,6 +172,8 @@
              shape, fitted inside this screen. -->
         <div class="viewer-wall" id="viewerWall">
             <div class="card-canvas presenting" id="viewerCanvas"></div>
+            <!-- Lines across the whole wall, for setting the bezels. -->
+            <div class="viewer-lines" aria-hidden="true"></div>
         </div>
         <div class="viewer-panel">
             <h2 id="viewerTitle"></h2>
@@ -228,6 +230,19 @@
             </div>
             <p class="mode-note" id="shareModeNote"></p>
 
+            <!-- Not under Send, which shows nothing. -->
+            <div class="ticker-row" id="tickerRow">
+                <button class="btn" id="shareTicker" type="button" aria-pressed="false">
+                    <span data-icon="ticker"></span><span id="shareTickerLabel">Ticker off</span>
+                </button>
+                <div class="seg" id="tickerSpeed" role="group" aria-label="Ticker speed" hidden>
+                    <button class="seg-btn" type="button" data-ticker-speed="slow" aria-pressed="false">Slow</button>
+                    <button class="seg-btn" type="button" data-ticker-speed="normal" aria-pressed="false">Normal</button>
+                    <button class="seg-btn" type="button" data-ticker-speed="fast" aria-pressed="false">Fast</button>
+                </div>
+            </div>
+            <p class="mode-note">With the ticker on, the words on a shown card roll along one line, round and round, like a news ticker.</p>
+
             <div class="share-idle" id="shareIdle">
                 <button class="btn btn-primary" id="shareStart" type="button">
                     <span data-icon="cast"></span>Start sharing
@@ -241,6 +256,8 @@
                 <p class="share-help">Scan the code with the other device, or open <span id="shareHost"></span> on it, tap Share screen and type the code.</p>
                 <p class="share-link" id="shareLink"></p>
                 <p class="share-status" id="shareStatus" role="status"></p>
+                <!-- Mirror, Extend and Send: who has joined, to remove. -->
+                <ul class="share-guests" id="shareGuests" hidden></ul>
 
                 <!-- Big Screen only: the screens by place, to put in order. -->
                 <div class="wall" id="wall" hidden>
@@ -258,7 +275,9 @@
                         </button>
                     </div>
                     <!-- How much of the card hides behind the edges between two
-                         screens. Right when a line across them comes out straight. -->
+                         screens, every seam at once. Each seam is also dragged
+                         on its own in the map above. Right when a line across
+                         them comes out straight. -->
                     <div class="wall-row">
                         <button class="btn" id="wallGapLess" type="button" aria-label="Thinner bezels">
                             <span data-icon="left"></span>
@@ -272,8 +291,8 @@
                         <button class="btn" id="wallIdentify" type="button" aria-pressed="false">
                             <span data-icon="grid"></span><span id="wallIdentifyLabel">Show numbers</span>
                         </button>
-                        <button class="btn btn-quiet" id="wallForget" type="button" hidden>
-                            <span data-icon="trash"></span>Remove missing
+                        <button class="btn" id="wallLines" type="button" aria-pressed="false">
+                            <span data-icon="lines"></span><span id="wallLinesLabel">Show lines</span>
                         </button>
                     </div>
                 </div>

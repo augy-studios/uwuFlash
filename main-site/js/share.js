@@ -22,6 +22,9 @@
                cards or replace its own with it. The one time the deck leaves
                this device, and only because somebody picked it.
 
+   Under any of the first three, Ticker runs the words of a shown card
+   together onto one line that rolls across the screens like a news ticker.
+
    The host is authoritative and sends a full snapshot twenty times a second.
    Snapshots carry no pictures: those go once each, in chunks, to a guest
    that says it lacks them, so a card with a photo costs its bytes once and
@@ -41,7 +44,9 @@ import { qrSvg } from "./qr.js";
 import { fillImage } from "./deck.js";
 import { getImage, readSetting, writeSetting } from "./store.js";
 import { closeModal, openModal, toast } from "./ui.js";
+import { icon } from "./icons.js";
 import { startViewing } from "./viewer.js";
+import { TICKER_SPEEDS } from "./ticker.js";
 
 const SNAPSHOT_MS = 50;
 // A guest pings every half second. Silence for this long is a guest that
@@ -73,9 +78,6 @@ const MODE_NOTES = {
 // What a guest calls its screen, so a reconnect is recognised as the same
 // one. Made by viewer.js.
 const SCREEN_ID = /^[a-z0-9]{6,24}$/;
-// Most screens are near 16:9 or 16:10; this is the shape assumed for one
-// that has not said.
-const DEFAULT_ASPECT = 16 / 10;
 // The card as it is made in the editor, which is the shape the other screen
 // draws it in under Extend.
 const CARD_ASPECT = 16 / 10;
@@ -84,10 +86,20 @@ const CARD_ASPECT = 16 / 10;
 const DEFAULT_SIZE = { w: 150, h: 70 };
 // Between two screens of a Big Screen, the part of the card that lands on
 // their bezels, in millimetres. Two phones in cases side by side lose about
-// eight; picked by eye in the sheet, from none to a TV's worth.
+// eight. Each seam between two columns or two rows has its own, set by
+// dragging it in the sheet until the lines on the screens meet straight:
+// a tenth of a millimetre for every pixel dragged, so it can be got exactly.
 const GAP_DEFAULT = 8;
-const GAP_STEP = 2;
-const GAP_MAX = 40;
+const GAP_STEP = 1;
+const GAP_MAX = 60;
+const SEAM_PER_PX = 0.1;
+const SEAM_KEY_STEP = 0.5;
+// The lines stay up on the screens this long after a seam is let go, to
+// judge it by.
+const LINES_LINGER_MS = 3000;
+// A screen that drops is held its place this long, for a blip in the wifi or
+// a reload, and then let go. One that leaves on purpose goes at once.
+const LOST_MS = 8000;
 // Two screens trading places in the grid. The screens themselves slide for
 // the same time, in viewer.js.
 const SWAP_MS = 420;
@@ -107,17 +119,23 @@ let pumping = false;
 const prepared = new Map(); // image id -> Promise<{ mime, data }>
 
 /* Big Screen. `order` is the screens by place, left to right and then down,
-   and a screen's number is its place plus one. A screen that drops, or
-   leaves, keeps its place so it comes back to the same piece of the card;
-   only the presenter moves or removes one. `cols` is null until somebody
-   picks it, which puts every screen in one row. `gap` is the bezels between
-   two screens, in millimetres, which the card runs on behind so a line
-   crossing from one screen to the next stays straight. */
-const wall = { order: [], cols: null, identify: false, gap: GAP_DEFAULT };
+   and a screen's number is its place plus one. A screen that drops keeps its
+   place for LOST_MS, so a blip brings it back to the same piece of the card;
+   after that, or when it leaves on purpose or the presenter removes it, the
+   screens after it close up. `cols` is null until somebody picks it, which
+   puts every screen in one row. `seamsX` and `seamsY` are the bezels at each
+   seam between two columns and two rows, in millimetres, which the card runs
+   on behind so a line crossing from one screen to the next stays straight;
+   `gap` is the width for a seam not yet set. `lines` puts lines across every
+   screen to set them by. */
+const wall = { order: [], cols: null, identify: false, lines: false, gap: GAP_DEFAULT, seamsX: [], seamsY: [] };
 // Screen id -> { w, h } in millimetres, kept after a screen drops, so the
 // rest do not move about while it comes back.
 const sizes = new Map();
 let picked = null; // the place tapped first, waiting for a second to swap with
+const lostAt = new Map(); // screen id -> when it was first seen not connected
+let drag = null; // the seam being dragged: { seam, axis, index, pointer, from, start }
+let linesUntil = 0;
 
 const el = {};
 
@@ -151,6 +169,18 @@ export function bigScreen() {
     })),
     identify: wall.identify,
   };
+}
+
+/* The ticker as the screens are told it, or null when it is off. The
+   presenter here draws the same, so what is seen here is what they show. */
+export function shareTicker() {
+  if (!host || shareMode() === "send" || readSetting("shareTicker") !== "on") return null;
+  return { speed: tickerSpeed() };
+}
+
+function tickerSpeed() {
+  const speed = readSetting("tickerSpeed");
+  return Object.hasOwn(TICKER_SPEEDS, speed) ? speed : "normal";
 }
 
 export function isHosting() {
@@ -246,7 +276,10 @@ function stopHosting({ tellGuest = false } = {}) {
   beatTimer = null;
   guests.clear();
   wall.identify = false;
+  wall.lines = false;
   picked = null;
+  drag = null;
+  lostAt.clear();
   status = { status: "idle" };
 
   if (tellGuest && h.links.size > 0) {
@@ -296,15 +329,19 @@ function onMessage(message, from) {
       guest.images.forEach((id) => guest.offered.delete(id));
       pumpImages();
       break;
-    case "bye":
+    case "bye": {
       // One screen of several leaving takes nothing from the rest, and a Big
       // Screen keeps its code while it is being put together. Otherwise the
       // code is spent: one shown to a room in this session should not keep
-      // working in the next.
+      // working in the next. A screen that left on purpose gives up its
+      // place, and the rest close up.
+      const screen = guest?.screen;
       dropGuest(from);
+      if (screen && !isOnline(screen)) forgetScreen(screen);
       if (shareMode() === "bigscreen" || host.links.size > 0) changed();
       else restartWithFreshCode();
       break;
+    }
     default:
       // `ping`, and anything from a newer build. Never thrown on.
       break;
@@ -317,6 +354,14 @@ function dropGuest(id) {
   if (!link) return;
   host.drop(link);
   host.refreshStatus();
+}
+
+/* Let one screen go because the presenter said so. It is told, and shows
+   that it was removed rather than trying to come back. */
+function removeGuest(id) {
+  const link = host?.links.get(id);
+  guests.delete(id);
+  if (link) host.kick(link, { type: "removed" });
 }
 
 /* A guest's screen in millimetres, from its own say-so: its size in CSS
@@ -364,6 +409,39 @@ function placeScreen(screen) {
   saveWall();
 }
 
+// Out of the wall, its place closed up by the screens after it.
+function forgetScreen(screen) {
+  const i = wall.order.indexOf(screen);
+  lostAt.delete(screen);
+  if (i < 0) return;
+  wall.order.splice(i, 1);
+  picked = null;
+  wallChanged();
+}
+
+function removeScreen(place) {
+  const screen = wall.order[place];
+  if (!screen) return;
+  for (const [id, guest] of [...guests]) if (guest.screen === screen) removeGuest(id);
+  forgetScreen(screen);
+}
+
+/* Screens that dropped and have not come back within LOST_MS are let go, so
+   the wall is only ever the screens that are there. */
+function forgetLost(now) {
+  const lost = [];
+  for (const screen of wall.order) {
+    if (isOnline(screen)) lostAt.delete(screen);
+    else if (!lostAt.has(screen)) lostAt.set(screen, now);
+    else if (now - lostAt.get(screen) > LOST_MS) lost.push(screen);
+  }
+  if (!lost.length) return;
+  lost.forEach((screen) => lostAt.delete(screen));
+  wall.order = wall.order.filter((screen) => !lost.includes(screen));
+  picked = null;
+  wallChanged();
+}
+
 function isOnline(screen) {
   for (const guest of guests.values()) if (guest.screen === screen) return true;
   return false;
@@ -379,8 +457,8 @@ function wallLayout() {
   return { count, cols, rows: Math.ceil(count / cols) };
 }
 
-// The middle of what the placed screens say, so one odd screen does not
-// skew the sheet's picture of the rest.
+// The middle of what the placed screens say, the size given to a blank
+// place, so one odd screen does not set it.
 function middleSize() {
   const known = wall.order.map((screen) => sizes.get(screen)).filter(Boolean);
   if (!known.length) return DEFAULT_SIZE;
@@ -388,18 +466,32 @@ function middleSize() {
   return { w: mid(known.map((s) => s.w)), h: mid(known.map((s) => s.h)) };
 }
 
-function screenAspect() {
-  if (!wall.order.some((screen) => sizes.has(screen))) return DEFAULT_ASPECT;
-  const { w, h } = middleSize();
-  return w / h;
+// The bezels at each seam, one per gap between two columns (`x`) or two
+// rows (`y`). A seam nobody has set takes the last width set for them all.
+function seams(axis, count) {
+  const list = axis === "x" ? wall.seamsX : wall.seamsY;
+  return Array.from({ length: Math.max(0, count) }, (_, i) => (Number.isFinite(list[i]) ? list[i] : wall.gap));
+}
+
+function setSeam(axis, index, mm) {
+  const list = axis === "x" ? wall.seamsX : wall.seamsY;
+  const { cols, rows } = wallLayout();
+  const filled = seams(axis, Math.max(axis === "x" ? cols - 1 : rows - 1, index + 1));
+  filled[index] = clampGap(mm);
+  list.length = 0;
+  list.push(...filled);
+}
+
+function clampGap(mm) {
+  return Math.round(Math.min(Math.max(mm, 0), GAP_MAX) * 10) / 10;
 }
 
 /* The wall laid out in millimetres, so screens of different sizes each show
    the piece of the card that is really in front of them. Every column is as
    wide as its widest screen and every row as tall as its tallest, each
-   screen centred in its cell, with the bezels between cells. A blank place
-   in a short bottom row is given the usual size. Cells are { left, top, w,
-   h }, one for every place in the grid, screens first. */
+   screen centred in its cell, with each seam's own bezels between cells. A
+   blank place in a short bottom row is given the usual size. Cells are
+   { left, top, w, h }, one for every place in the grid, screens first. */
 function wallGeometry() {
   const { cols, rows } = wallLayout();
   const usual = middleSize();
@@ -413,9 +505,11 @@ function wallGeometry() {
     rowH[Math.floor(i / cols)] = Math.max(rowH[Math.floor(i / cols)], h);
   }
 
-  const offsets = (list) => list.map((_, i) => list.slice(0, i).reduce((a, b) => a + b, 0) + i * wall.gap);
-  const colX = offsets(colW);
-  const rowY = offsets(rowH);
+  const gapX = seams("x", cols - 1);
+  const gapY = seams("y", rows - 1);
+  const sum = (list, n) => list.slice(0, n).reduce((a, b) => a + b, 0);
+  const colX = colW.map((_, i) => sum(colW, i) + sum(gapX, i));
+  const rowY = rowH.map((_, i) => sum(rowH, i) + sum(gapY, i));
   const cells = Array.from({ length: cols * rows }, (_, i) => {
     const { w, h } = sizeAt(i);
     const c = i % cols;
@@ -427,6 +521,9 @@ function wallGeometry() {
     width: colX[cols - 1] + colW[cols - 1],
     height: rowY[rows - 1] + rowH[rows - 1],
     cells,
+    // Where each seam's bezels are, for the handles in the sheet.
+    seamsX: gapX.map((gap, i) => ({ at: colX[i] + colW[i], gap })),
+    seamsY: gapY.map((gap, i) => ({ at: rowY[i] + rowH[i], gap })),
   };
 }
 
@@ -449,6 +546,7 @@ function wallTile(screen) {
     cols,
     rows,
     identify: wall.identify,
+    lines: linesShowing(),
     box: {
       x: round(-cell.left / cell.w),
       y: round(-cell.top / cell.h),
@@ -464,21 +562,41 @@ function loadWall() {
     .slice(0, MAX_SCREENS);
   const cols = Number.parseInt(readSetting("wallCols"), 10);
   wall.cols = cols >= 1 && cols <= MAX_SCREENS ? cols : null;
-  const gap = Number.parseInt(readSetting("wallGap"), 10);
-  wall.gap = gap >= 0 && gap <= GAP_MAX ? gap : GAP_DEFAULT;
+  const gap = Number.parseFloat(readSetting("wallGap"));
+  wall.gap = gap >= 0 && gap <= GAP_MAX ? clampGap(gap) : GAP_DEFAULT;
+  const list = (name) =>
+    (readSetting(name) || "")
+      .split(",")
+      .slice(0, MAX_SCREENS)
+      .map(Number.parseFloat)
+      .map((mm) => (Number.isFinite(mm) ? clampGap(mm) : wall.gap));
+  wall.seamsX = list("wallSeamsX");
+  wall.seamsY = list("wallSeamsY");
+  // Places kept from before a reload are held for their screens as if they
+  // had just dropped, and let go if they do not come back.
+  lostAt.clear();
 }
 
 function saveWall() {
   writeSetting("wallOrder", wall.order.length ? wall.order.join(",") : null);
   writeSetting("wallCols", wall.cols);
   writeSetting("wallGap", wall.gap);
+  writeSetting("wallSeamsX", wall.seamsX.length ? wall.seamsX.join(",") : null);
+  writeSetting("wallSeamsY", wall.seamsY.length ? wall.seamsY.join(",") : null);
 }
 
 function clearWall() {
   wall.order = [];
   wall.cols = null;
   picked = null;
+  lostAt.clear();
   saveWall();
+}
+
+// Lines across the whole wall on every screen: while a seam is being
+// dragged, a moment after, and while the presenter has them on.
+function linesShowing() {
+  return wall.lines || drag !== null || Date.now() < linesUntil;
 }
 
 // A change to the wall reaches the screens at once, not on the next beat.
@@ -503,6 +621,7 @@ function beat() {
   for (const [id, guest] of [...guests]) {
     if (now - guest.heard > GUEST_SILENT_MS) dropGuest(id);
   }
+  forgetLost(now);
 
   if (host.links.size === 0) return;
   sendSnapshots();
@@ -533,6 +652,8 @@ function snapshot(screen) {
     type: "state",
     mode: sending ? "send" : "show",
     presenting: false,
+    // The host's clock, which the screens roll a ticker by so they agree.
+    clock: Date.now(),
     theme: { color: root.getAttribute("data-color-theme"), mode: root.getAttribute("data-mode") },
   };
   if (mode === "bigscreen" && screen) message.wall = wallTile(screen);
@@ -548,6 +669,8 @@ function snapshot(screen) {
   if (!sending && f?.presenting && f.card) {
     message.presenting = true;
     message.card = wireCard(f.card);
+    const ticker = shareTicker();
+    if (ticker) message.ticker = ticker;
   }
 
   return message;
@@ -808,60 +931,154 @@ function renderSheet() {
   el.button.setAttribute("aria-label", host ? "Sharing screen" : "Share screen");
 
   renderWall();
+  renderGuests();
+  renderTicker();
 }
 
-/* The screens of a Big Screen as they sit, numbered by place. Tapping one and
-   then another swaps them, which is how the grid here is made to match the
-   screens on the table: show the numbers, see which is where, swap. */
+/* The screens of a Big Screen as they sit, numbered by place, drawn where
+   they are on the wall with the bezels between them to scale. Tapping one
+   and then another swaps them, which is how the grid here is made to match
+   the screens on the table: show the numbers, see which is where, swap.
+   Each seam between two columns or rows is a handle; dragging it sets the
+   bezels there while the screens show lines to line up. */
 function renderWall() {
   const show = host !== null && shareMode() === "bigscreen";
   el.wall.hidden = !show;
   if (!show) return;
 
-  const { count, cols, rows } = wallLayout();
-  const aspect = screenAspect();
+  // Drawn afresh, the handle under the finger would be lost mid drag. The
+  // rest catches up when it is let go.
+  if (drag) {
+    layoutMap();
+    return;
+  }
+
+  const { count, cols } = wallLayout();
   const empty = wall.order.length === 0;
   if (picked !== null && picked >= wall.order.length) picked = null;
 
   el.wallEmpty.hidden = !empty;
   el.wallMap.hidden = empty;
-  el.wallMap.style.setProperty("--cols", cols);
-  el.wallMap.style.setProperty("--aspect", aspect);
-  // Narrower as the grid gets taller, so a column of screens fits the sheet.
-  const mapWidth = Math.min(340, Math.max(100 * cols, (200 * cols * aspect) / rows));
-  el.wallMap.style.setProperty("--map-width", `${Math.round(mapWidth)}px`);
   el.wallMap.classList.toggle("identifying", wall.identify);
-  el.wallMap.innerHTML = wall.order
-    .map((screen, i) => {
-      const online = isOnline(screen);
-      const label = `Screen ${i + 1}${online ? "" : ", not connected"}`;
-      return `<button class="wall-tile${online ? "" : " offline"}${picked === i ? " picked" : ""}" type="button"
-        data-place="${i}" aria-pressed="${picked === i}" aria-label="${label}">
-        <span class="wall-num">${i + 1}</span>${online ? "" : '<span class="wall-off">Not connected</span>'}
-      </button>`;
-    })
-    .join("");
+  const geo = wallGeometry();
+  const tiles = wall.order.map((screen, i) => {
+    const online = isOnline(screen);
+    const label = `Screen ${i + 1}${online ? "" : ", reconnecting"}`;
+    return `<div class="wall-tile${online ? "" : " offline"}${picked === i ? " picked" : ""}" data-tile="${i}">
+        <button class="wall-pick" type="button" data-place="${i}" aria-pressed="${picked === i}" aria-label="${label}">
+          <span class="wall-num">${i + 1}</span>${online ? "" : '<span class="wall-off">Reconnecting</span>'}
+        </button>
+        <button class="wall-remove" type="button" data-remove="${i}" aria-label="Remove screen ${i + 1}">${icon("close")}</button>
+      </div>`;
+  });
+  const handle = (axis, i) => {
+    const between = axis === "x" ? `columns ${i + 1} and ${i + 2}` : `rows ${i + 1} and ${i + 2}`;
+    return `<div class="wall-seam ${axis}" data-seam="${axis}" data-index="${i}" role="slider" tabindex="0"
+        aria-orientation="${axis === "x" ? "horizontal" : "vertical"}" aria-label="Bezels between ${between}"
+        aria-valuemin="0" aria-valuemax="${GAP_MAX}"><span class="wall-seam-value"></span></div>`;
+  };
+  el.wallMap.innerHTML =
+    tiles.join("") +
+    geo.seamsX.map((_, i) => handle("x", i)).join("") +
+    geo.seamsY.map((_, i) => handle("y", i)).join("");
+  layoutMap(geo);
 
   el.wallHint.hidden = wall.order.length < 2;
   el.wallHint.textContent =
-    picked === null ? "Tap two screens to swap them." : `Now tap the screen to swap with ${picked + 1}.`;
+    picked === null
+      ? "Tap two screens to swap them. Drag a line between two screens until the lines on them meet straight."
+      : `Now tap the screen to swap with ${picked + 1}.`;
 
   el.wallCols.textContent = `${cols} across`;
   el.wallFewer.disabled = cols <= 1;
   el.wallMore.disabled = cols >= count;
 
-  el.wallGap.textContent = wall.gap ? `Bezels ${wall.gap} mm` : "No bezels";
-  el.wallGapLess.disabled = wall.gap <= 0;
-  el.wallGapMore.disabled = wall.gap >= GAP_MAX;
+  const all = [...geo.seamsX, ...geo.seamsY].map((s) => s.gap);
+  const low = all.length ? Math.min(...all) : wall.gap;
+  const high = all.length ? Math.max(...all) : wall.gap;
+  el.wallGap.textContent =
+    high === 0 ? "No bezels" : low === high ? `Bezels ${mm(low)}` : `Bezels ${mm(low)} to ${mm(high)}`;
+  el.wallGapLess.disabled = high <= 0;
+  el.wallGapMore.disabled = low >= GAP_MAX;
 
   el.wallIdentify.setAttribute("aria-pressed", String(wall.identify));
   el.wallIdentify.classList.toggle("btn-primary", wall.identify);
   el.wallIdentifyLabel.textContent = wall.identify ? "Hide numbers" : "Show numbers";
-  el.wallForget.hidden = !wall.order.some((screen) => !isOnline(screen));
+  el.wallLines.setAttribute("aria-pressed", String(wall.lines));
+  el.wallLines.classList.toggle("btn-primary", wall.lines);
+  el.wallLinesLabel.textContent = wall.lines ? "Hide lines" : "Show lines";
+}
+
+function mm(n) {
+  return `${Number.isInteger(n) ? n : n.toFixed(1)} mm`;
+}
+
+/* Places every tile and handle where the wall says, as percentages of the
+   map, which is the wall's own shape. Cheap enough for every move of a
+   drag. */
+function layoutMap(geo = wallGeometry()) {
+  const aspect = geo.width / geo.height;
+  el.wallMap.style.setProperty("--aspect", aspect);
+  // Narrower as the wall gets taller, so a column of screens fits the sheet.
+  el.wallMap.style.setProperty("--map-width", `${Math.round(Math.min(340, Math.max(120, 220 * aspect)))}px`);
+  const pct = (n, of) => `${((n / of) * 100).toFixed(3)}%`;
+
+  el.wallMap.querySelectorAll("[data-tile]").forEach((tile) => {
+    const cell = geo.cells[Number(tile.dataset.tile)];
+    if (!cell) return;
+    tile.style.left = pct(cell.left, geo.width);
+    tile.style.top = pct(cell.top, geo.height);
+    tile.style.width = pct(cell.w, geo.width);
+    tile.style.height = pct(cell.h, geo.height);
+  });
+
+  el.wallMap.querySelectorAll("[data-seam]").forEach((handle) => {
+    const across = handle.dataset.seam === "x";
+    const seam = (across ? geo.seamsX : geo.seamsY)[Number(handle.dataset.index)];
+    if (!seam) return;
+    const middle = seam.at + seam.gap / 2;
+    if (across) handle.style.left = pct(middle, geo.width);
+    else handle.style.top = pct(middle, geo.height);
+    handle.setAttribute("aria-valuenow", String(seam.gap));
+    handle.setAttribute("aria-valuetext", mm(seam.gap));
+    handle.firstElementChild.textContent = mm(seam.gap);
+  });
+}
+
+/* Under Mirror, Extend and Send: the device that has joined, which can be
+   let go from here. On a Big Screen the tiles do this instead. */
+function renderGuests() {
+  const list = host && shareMode() !== "bigscreen" ? [...guests.keys()].filter((id) => host.links.has(id)) : [];
+  el.guests.hidden = list.length === 0;
+  el.guests.innerHTML = list
+    .map(
+      (id, i) => `<li class="share-guest">
+        <span class="share-guest-dot" aria-hidden="true"></span>
+        <span class="share-guest-name">${list.length === 1 ? "Other screen" : `Screen ${i + 1}`}, connected</span>
+        <button class="btn btn-quiet" type="button" data-remove-guest="${i}">${icon("close")}Remove</button>
+      </li>`
+    )
+    .join("");
+  el.guests.dataset.ids = list.join(" ");
+}
+
+function renderTicker() {
+  const on = readSetting("shareTicker") === "on";
+  el.tickerRow.hidden = shareMode() === "send";
+  el.ticker.setAttribute("aria-pressed", String(on));
+  el.ticker.classList.toggle("btn-primary", on);
+  el.tickerLabel.textContent = on ? "Ticker on" : "Ticker off";
+  el.tickerSpeed.hidden = !on;
+  const speed = tickerSpeed();
+  el.tickerSpeedButtons.forEach((btn) => {
+    const active = btn.dataset.tickerSpeed === speed;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", String(active));
+  });
 }
 
 function tileAt(place) {
-  return el.wallMap.querySelector(`[data-place="${place}"]`);
+  return el.wallMap.querySelector(`[data-tile="${place}"]`);
 }
 
 // The grid is drawn afresh on every change, so a tile is moved by starting
@@ -882,8 +1099,26 @@ function reducedMotion() {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 }
 
+function seamValue(axis, index) {
+  const { cols, rows } = wallLayout();
+  return seams(axis, axis === "x" ? cols - 1 : rows - 1)[index] ?? wall.gap;
+}
+
+function endDrag() {
+  if (!drag) return;
+  drag.seam.classList.remove("dragging");
+  drag = null;
+  linesUntil = Date.now() + LINES_LINGER_MS;
+  wallChanged();
+}
+
 function wireWall() {
   el.wallMap.addEventListener("click", (e) => {
+    const remove = e.target.closest("[data-remove]");
+    if (remove) {
+      removeScreen(Number(remove.dataset.remove));
+      return;
+    }
     const tile = e.target.closest("[data-place]");
     if (!tile) return;
     const place = Number(tile.dataset.place);
@@ -902,6 +1137,51 @@ function wireWall() {
     slideTile(place, before[0], before[1]);
   });
 
+  // Dragging a seam: finely, so it can be set to the tenth of a millimetre
+  // while watching the lines on the screens, and measured from where the
+  // drag began so the map growing under the finger does not run away.
+  el.wallMap.addEventListener("pointerdown", (e) => {
+    const seam = e.target.closest("[data-seam]");
+    if (!seam || drag) return;
+    e.preventDefault();
+    seam.setPointerCapture?.(e.pointerId);
+    seam.focus({ preventScroll: true });
+    const axis = seam.dataset.seam;
+    const index = Number(seam.dataset.index);
+    drag = { seam, axis, index, pointer: e.pointerId, from: axis === "x" ? e.clientX : e.clientY, start: seamValue(axis, index) };
+    seam.classList.add("dragging");
+    shareNow();
+  });
+  el.wallMap.addEventListener("pointermove", (e) => {
+    if (!drag || e.pointerId !== drag.pointer) return;
+    const moved = (drag.axis === "x" ? e.clientX : e.clientY) - drag.from;
+    const next = clampGap(drag.start + moved * SEAM_PER_PX);
+    if (next === seamValue(drag.axis, drag.index)) return;
+    setSeam(drag.axis, drag.index, next);
+    layoutMap();
+    shareNow();
+  });
+  el.wallMap.addEventListener("pointerup", (e) => {
+    if (drag && e.pointerId === drag.pointer) endDrag();
+  });
+  el.wallMap.addEventListener("pointercancel", (e) => {
+    if (drag && e.pointerId === drag.pointer) endDrag();
+  });
+  el.wallMap.addEventListener("keydown", (e) => {
+    const seam = e.target.closest("[data-seam]");
+    if (!seam) return;
+    const step = e.shiftKey ? 2 : SEAM_KEY_STEP;
+    const by = { ArrowRight: step, ArrowUp: step, ArrowLeft: -step, ArrowDown: -step }[e.key];
+    const axis = seam.dataset.seam;
+    const index = Number(seam.dataset.index);
+    if (by === undefined && e.key !== "Home") return;
+    e.preventDefault();
+    setSeam(axis, index, e.key === "Home" ? 0 : seamValue(axis, index) + by);
+    linesUntil = Date.now() + LINES_LINGER_MS;
+    wallChanged();
+    el.wallMap.querySelector(`[data-seam="${axis}"][data-index="${index}"]`)?.focus();
+  });
+
   el.wallFewer.addEventListener("click", () => {
     wall.cols = Math.max(1, wallLayout().cols - 1);
     wallChanged();
@@ -911,15 +1191,17 @@ function wireWall() {
     wallChanged();
   });
 
-  // By eye: a line drawn across two screens should come out straight.
-  el.wallGapLess.addEventListener("click", () => {
-    wall.gap = Math.max(0, wall.gap - GAP_STEP);
+  // Every seam at once, keeping how they differ from one another.
+  const nudgeAll = (by) => {
+    const { cols, rows } = wallLayout();
+    wall.seamsX = seams("x", cols - 1).map((mm) => clampGap(mm + by));
+    wall.seamsY = seams("y", rows - 1).map((mm) => clampGap(mm + by));
+    wall.gap = clampGap(wall.gap + by);
+    linesUntil = Date.now() + LINES_LINGER_MS;
     wallChanged();
-  });
-  el.wallGapMore.addEventListener("click", () => {
-    wall.gap = Math.min(GAP_MAX, wall.gap + GAP_STEP);
-    wallChanged();
-  });
+  };
+  el.wallGapLess.addEventListener("click", () => nudgeAll(-GAP_STEP));
+  el.wallGapMore.addEventListener("click", () => nudgeAll(GAP_STEP));
 
   // Every screen shows its number at once, and the grid here shows the same
   // numbers, until pressed again.
@@ -929,11 +1211,14 @@ function wireWall() {
     shareNow();
   });
 
-  // The places of screens that are not coming back. The rest close up.
-  el.wallForget.addEventListener("click", () => {
-    wall.order = wall.order.filter(isOnline);
-    picked = null;
-    wallChanged();
+  // Lines across the whole wall, to judge the bezels by from across the
+  // room: where they bend crossing from one screen to the next, that seam
+  // wants more or less.
+  el.wallLines.addEventListener("click", () => {
+    wall.lines = !wall.lines;
+    linesUntil = 0;
+    changed();
+    shareNow();
   });
 }
 
@@ -969,6 +1254,28 @@ function wireSheet() {
     // the snapshot that says to expect one.
     shareNow();
     sendDeck();
+  });
+
+  el.guests.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-remove-guest]");
+    if (!btn || !host) return;
+    const id = (el.guests.dataset.ids || "").split(" ")[Number(btn.dataset.removeGuest)];
+    if (!id) return;
+    removeGuest(id);
+    changed();
+  });
+
+  el.ticker.addEventListener("click", () => {
+    writeSetting("shareTicker", readSetting("shareTicker") === "on" ? null : "on");
+    changed();
+    shareNow();
+  });
+  el.tickerSpeed.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-ticker-speed]");
+    if (!btn || !Object.hasOwn(TICKER_SPEEDS, btn.dataset.tickerSpeed)) return;
+    writeSetting("tickerSpeed", btn.dataset.tickerSpeed);
+    changed();
+    shareNow();
   });
 
   el.start.addEventListener("click", () => {
@@ -1042,7 +1349,14 @@ export function initShare({ getFrame }) {
   el.wallGapMore = document.getElementById("wallGapMore");
   el.wallIdentify = document.getElementById("wallIdentify");
   el.wallIdentifyLabel = document.getElementById("wallIdentifyLabel");
-  el.wallForget = document.getElementById("wallForget");
+  el.wallLines = document.getElementById("wallLines");
+  el.wallLinesLabel = document.getElementById("wallLinesLabel");
+  el.guests = document.getElementById("shareGuests");
+  el.tickerRow = document.getElementById("tickerRow");
+  el.ticker = document.getElementById("shareTicker");
+  el.tickerLabel = document.getElementById("shareTickerLabel");
+  el.tickerSpeed = document.getElementById("tickerSpeed");
+  el.tickerSpeedButtons = el.tickerSpeed.querySelectorAll("[data-ticker-speed]");
 
   el.host = document.getElementById("shareHost");
   if (el.host) el.host.textContent = location.host;

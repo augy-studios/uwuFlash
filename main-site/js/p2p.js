@@ -16,8 +16,10 @@ export const CODE_LENGTH = 6;
 // the host picked Send, so the two are told to reload instead. 3 added Big
 // Screen, where a guest on 2 would show the whole card instead of its piece.
 // 4 added a picture filling the card, which a guest on 3 would draw in its
-// own space beside the words, uncropped.
-export const PROTOCOL_VERSION = 4;
+// own space beside the words, uncropped. 5 added the ticker, screens the
+// host can remove, and the lines for setting bezels, none of which a guest
+// on 4 would draw.
+export const PROTOCOL_VERSION = 5;
 // The most pictures either side keeps track of for the other: the guest's
 // `have` list, and the pictures a sent deck may bring.
 export const MAX_SHARED_IMAGES = 200;
@@ -229,6 +231,19 @@ export class Host extends Connection {
   drop(link) {
     this.links.delete(link.peer);
     link.close();
+  }
+
+  // Let go of one guest on purpose: told why first, and closed once that has
+  // had time to leave. Out of the map at once, so nothing else is sent to it.
+  kick(link, message) {
+    this.links.delete(link.peer);
+    try {
+      link.send(message);
+    } catch {
+      // Already closing; it goes all the same.
+    }
+    setTimeout(() => link.close(), 300);
+    this.refreshStatus();
   }
 
   // To one guest when `to` is given, otherwise to all of them.
