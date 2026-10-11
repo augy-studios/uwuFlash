@@ -43,6 +43,9 @@ const RESIZE_MS = 250;
 // A Big Screen screen moving to a new place; the same time as the tiles in
 // the host's grid, in share.js.
 const SWAP_MS = 420;
+// A screen this close to the card's shape fills itself with the card,
+// cropping a sliver, rather than showing thin bars down two sides.
+const SHAPE_SLACK = 0.12;
 
 const MAX_IMAGES = 40;
 const MAX_INCOMING = 4;
@@ -147,8 +150,20 @@ function ownScreenId() {
   return screenId;
 }
 
+/* This screen's size, and a guess at how many CSS pixels make a millimetre
+   on it, so a Big Screen of different screens can line them up by how big
+   they really are. A page cannot ask, so it goes by the kind of device:
+   phones draw about 160 to the inch, tablets about 132, computers about 110.
+   Two of the same model always agree, which is the usual Big Screen. */
+function screenSize() {
+  const short = Math.min(window.screen?.width || 0, window.screen?.height || 0) || Math.min(window.innerWidth, window.innerHeight);
+  const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  const perInch = coarse ? (short < 600 ? 160 : 132) : 110;
+  return { w: window.innerWidth, h: window.innerHeight, ppm: Math.round((perInch / 25.4) * 1000) / 1000 };
+}
+
 function introduce() {
-  return { screen: ownScreenId(), w: window.innerWidth, h: window.innerHeight };
+  return { screen: ownScreenId(), ...screenSize() };
 }
 
 async function join() {
@@ -311,7 +326,8 @@ function readState(message) {
   const mode = message.mode === "send" ? "send" : "show";
   const card = mode === "show" && message.presenting === true ? readCard(message.card) : null;
   const wall = mode === "show" ? readWall(message.wall) : null;
-  return { mode, presenting: card !== null, card, theme, wall };
+  const shape = Number.isFinite(message.shape) ? Math.min(Math.max(message.shape, 0.25), 4) : null;
+  return { mode, presenting: card !== null, card, theme, wall, shape };
 }
 
 /* Where this screen sits in a Big Screen, or null for the whole card. Every
@@ -328,7 +344,17 @@ function readWall(wall) {
   ) {
     return null;
   }
-  return { n, of, col, row, cols, rows, identify: wall.identify === true };
+  return { n, of, col, row, cols, rows, identify: wall.identify === true, box: readBox(wall.box, wall) };
+}
+
+// The whole wall measured in this screen. Without one, from a host before
+// screens had sizes, every screen takes an equal share.
+function readBox(box, { col, row, cols, rows }) {
+  const fine = (n, min, max) => Number.isFinite(n) && n >= min && n <= max;
+  if (box && fine(box.w, 1, 100) && fine(box.h, 1, 100) && fine(box.x, -100, 0) && fine(box.y, -100, 0)) {
+    return { x: box.x, y: box.y, w: box.w, h: box.h };
+  }
+  return { x: -col, y: -row, w: cols, h: rows };
 }
 
 /* A sent deck. Cards that do not read are dropped, and so are image layers
@@ -486,25 +512,65 @@ function wearTheme({ color, mode }) {
   if (root.getAttribute("data-mode") !== mode) root.setAttribute("data-mode", mode);
 }
 
-/* The card is drawn the size of the whole grid and moved so this screen's
-   piece is the part inside it. Sizes on the card are relative to the box it
-   is drawn in, so the words come out one size across every screen. Each
-   screen takes an equal share whatever its own size, which lines up best on
-   screens of one shape. */
-function placeWall(wall) {
-  const { cols = 1, rows = 1, col = 0, row = 0 } = wall ?? {};
-  const key = `${cols},${rows},${col},${row}`;
+/* Where the card is drawn, as fractions of this screen.
+
+   On a Big Screen the card is drawn the size of the whole wall and moved so
+   this screen's piece is the part inside it. The host works out the wall
+   from how big every screen really is and how much hides behind the bezels
+   between them, so a line crossing two screens stays straight. Sizes on the
+   card are relative to the box it is drawn in, so the words come out one
+   size across every screen.
+
+   Otherwise the card keeps the shape it has on the other device, as large
+   as fits inside the part of this screen clear of notches and rounded
+   corners, with the card's colour round it. A picture is then cropped the
+   same here as there, instead of a wide card being cut down to a tall
+   phone's shape and looking zoomed in. */
+function stageRect() {
+  if (state?.wall) return state.wall.box;
+
+  const W = el.viewer.clientWidth || window.innerWidth;
+  const H = el.viewer.clientHeight || window.innerHeight;
+  const inset = safeInsets();
+  const room = { x: inset.left, y: inset.top, w: Math.max(1, W - inset.left - inset.right), h: Math.max(1, H - inset.top - inset.bottom) };
+  const shape = state?.shape;
+  let { w, h } = room;
+  if (shape && Math.abs(Math.log((room.w / room.h) / shape)) > Math.log(1 + SHAPE_SLACK)) {
+    if (room.w / room.h > shape) w = room.h * shape;
+    else h = room.w / shape;
+  }
+  return {
+    x: (room.x + (room.w - w) / 2) / W,
+    y: (room.y + (room.h - h) / 2) / H,
+    w: w / W,
+    h: h / H,
+  };
+}
+
+// The notch, the camera, rounded corners and the home bar, as the browser
+// reports them. Nothing on a screen without any.
+function safeInsets() {
+  const probe = el.safe;
+  if (!probe) return { top: 0, right: 0, bottom: 0, left: 0 };
+  const cs = getComputedStyle(probe);
+  const px = (v) => Number.parseFloat(v) || 0;
+  return { top: px(cs.paddingTop), right: px(cs.paddingRight), bottom: px(cs.paddingBottom), left: px(cs.paddingLeft) };
+}
+
+function placeStage() {
+  const { x, y, w, h } = stageRect();
+  const key = [x, y, w, h].map((n) => n.toFixed(5)).join(",");
   if (key === wallKey) return;
   wallKey = key;
   const style = el.wall.style;
-  style.setProperty("--cols", cols);
-  style.setProperty("--rows", rows);
-  style.setProperty("--col", col);
-  style.setProperty("--row", row);
+  style.setProperty("--x", x);
+  style.setProperty("--y", y);
+  style.setProperty("--w", w);
+  style.setProperty("--h", h);
 }
 
 function apply() {
-  placeWall(state?.wall);
+  placeStage();
   const card = state?.presenting ? state.card : null;
   if (!card) {
     if (shownKey) showNothing();
@@ -637,14 +703,14 @@ function renderPanel() {
     title = `Screen ${state.wall.n} of ${state.wall.of}`;
     message = stale
       ? "Not hearing from the other device. It may be asleep or out of range."
-      : `Joined ${readable} as part of a Big Screen. This screen shows its piece of each card when the other device presses play.`;
+      : `Joined ${readable} as part of a Big Screen. This screen shows its piece of each card when the other device presses play. Turn every screen's brightness up to the same level so they match.`;
     actions = ["fullscreen", "leave"];
     if (stale) badge = "Connection looks stale";
   } else if (status === "connected") {
     title = "Ready";
     message = stale
       ? "Not hearing from the other device. It may be asleep or out of range."
-      : `Joined ${readable}. The cards appear here when the other device presses play.`;
+      : `Joined ${readable}. The cards appear here when the other device presses play. Turn this screen's brightness up so they read across the room.`;
     actions = ["fullscreen", "leave"];
     if (stale) badge = "Connection looks stale";
   } else {
@@ -797,7 +863,6 @@ export function leaveViewer() {
   outdated = false;
   full = false;
   clearTimeout(resizeTimer);
-  placeWall(null);
   showNothing();
 
   open = false;
@@ -820,15 +885,29 @@ async function toggleFullscreen() {
   renderPanel();
 }
 
+/* This screen is put down and left, so it must not dim or lock. The browser
+   lets go of the lock whenever the page is hidden, and some let go on their
+   own (a battery saver turning on), so it is asked for again whenever it
+   goes and the page can hold it. A page cannot turn the brightness up; the
+   panel asks for that. */
+let wakeAsking = false;
+
 async function requestWakeLock() {
-  if (!open || wakeLock) return;
+  if (!open || wakeLock || wakeAsking || document.visibilityState !== "visible") return;
+  wakeAsking = true;
   try {
-    wakeLock = (await navigator.wakeLock?.request("screen")) ?? null;
-    wakeLock?.addEventListener("release", () => {
+    const lock = (await navigator.wakeLock?.request("screen")) ?? null;
+    wakeLock = lock;
+    lock?.addEventListener("release", () => {
+      if (wakeLock !== lock) return;
       wakeLock = null;
+      // Hidden pages get it back on visibilitychange instead.
+      setTimeout(requestWakeLock, 1000);
     });
   } catch {
-    /* unsupported or refused; the screen may dim */
+    /* unsupported, or refused until the page is touched; tried again then */
+  } finally {
+    wakeAsking = false;
   }
 }
 
@@ -845,6 +924,7 @@ export function initViewer({ importCards } = {}) {
   if (importCards) onImport = importCards;
 
   el.viewer = document.getElementById("viewer");
+  el.safe = document.getElementById("viewerSafe");
   el.wall = document.getElementById("viewerWall");
   el.canvas = document.getElementById("viewerCanvas");
   el.panel = el.viewer.querySelector(".viewer-panel");
@@ -877,11 +957,16 @@ export function initViewer({ importCards } = {}) {
   // going full screen or turning a phone changes it.
   window.addEventListener("resize", () => {
     if (!open) return;
+    placeStage();
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
-      guest?.send({ type: "size", w: window.innerWidth, h: window.innerHeight });
+      guest?.send({ type: "size", ...screenSize() });
     }, RESIZE_MS);
   });
+
+  // Some browsers only grant the lock after the page is touched.
+  el.viewer.addEventListener("pointerdown", requestWakeLock);
+  document.addEventListener("fullscreenchange", requestWakeLock);
 
   // The browser drops a wake lock when the page is hidden, and a channel
   // often dies with a backgrounded page. Both come back here.

@@ -166,8 +166,10 @@
     <!-- The other screen. Covers the editor while this device is showing
          somebody else's cards; see js/viewer.js. -->
     <div class="viewer hidden" id="viewer" role="dialog" aria-modal="true" aria-label="Shared screen">
+        <div class="viewer-safe" id="viewerSafe" aria-hidden="true"></div>
         <!-- The size of the whole Big Screen, moved so this screen's piece
-             is the part on show; the size of this screen otherwise. -->
+             is the part on show; otherwise the card in the other device's
+             shape, fitted inside this screen. -->
         <div class="viewer-wall" id="viewerWall">
             <div class="card-canvas presenting" id="viewerCanvas"></div>
         </div>
@@ -252,6 +254,17 @@
                         </button>
                         <span class="wall-cols" id="wallCols" aria-live="polite"></span>
                         <button class="btn" id="wallMore" type="button" aria-label="More screens across">
+                            <span data-icon="right"></span>
+                        </button>
+                    </div>
+                    <!-- How much of the card hides behind the edges between two
+                         screens. Right when a line across them comes out straight. -->
+                    <div class="wall-row">
+                        <button class="btn" id="wallGapLess" type="button" aria-label="Thinner bezels">
+                            <span data-icon="left"></span>
+                        </button>
+                        <span class="wall-cols" id="wallGap" aria-live="polite"></span>
+                        <button class="btn" id="wallGapMore" type="button" aria-label="Thicker bezels">
                             <span data-icon="right"></span>
                         </button>
                     </div>

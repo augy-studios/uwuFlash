@@ -588,7 +588,7 @@ async function showPresentCard() {
   const wall = bigScreen();
   showWallGrid(wall);
   if (wall) {
-    const online = wall.screens.filter((s) => s.online).length;
+    const online = wall.cells.filter((c) => c.online).length;
     el.remoteStatus.textContent =
       online > 0 ? `On ${online} screen${online === 1 ? "" : "s"}` : "Waiting for screens to join";
   } else {
@@ -607,23 +607,25 @@ async function showPresentCard() {
   ]);
 }
 
-/* The frames take the shape of the whole Big Screen, so what is drawn here
-   is what the screens show between them, and the grid marks where one ends
-   and the next begins. Places past the last screen in a short bottom row are
-   left blank. */
+/* The frames take the shape of the whole Big Screen, bezels and all, so
+   what is drawn here is what the screens show between them, and each
+   screen's outline sits where it is in front of the card. Places past the
+   last screen in a short bottom row are left blank. */
 function showWallGrid(wall) {
-  el.present.style.setProperty("--wall-aspect", wall ? (wall.cols * wall.aspect) / wall.rows : 1.6);
+  el.present.style.setProperty("--wall-aspect", wall ? wall.aspect : 1.6);
   el.remoteGrid.hidden = !wall;
   if (!wall) return;
 
-  el.remoteGrid.style.setProperty("--cols", wall.cols);
   el.remoteGrid.style.setProperty("--rows", wall.rows);
   el.remoteGrid.classList.toggle("identifying", wall.identify);
-  el.remoteGrid.innerHTML = Array.from({ length: wall.cols * wall.rows }, (_, i) => {
-    const screen = wall.screens[i];
-    if (!screen) return '<span class="remote-cell blank"></span>';
-    return `<span class="remote-cell${screen.online ? "" : " offline"}">${screen.number}</span>`;
-  }).join("");
+  const pct = (n) => `${Math.round(n * 100000) / 1000}%`;
+  el.remoteGrid.innerHTML = wall.cells
+    .map((cell) => {
+      const place = `left:${pct(cell.x)};top:${pct(cell.y)};width:${pct(cell.w)};height:${pct(cell.h)}`;
+      if (cell.blank) return `<span class="remote-cell blank" style="${place}"></span>`;
+      return `<span class="remote-cell${cell.online ? "" : " offline"}" style="${place}">${cell.number}</span>`;
+    })
+    .join("");
 }
 
 /* What the other screen is told about. Nothing card shaped leaves this
