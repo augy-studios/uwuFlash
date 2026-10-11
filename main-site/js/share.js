@@ -22,8 +22,9 @@
                cards or replace its own with it. The one time the deck leaves
                this device, and only because somebody picked it.
 
-   Under any of the first three, Ticker runs the words of a shown card
-   together onto one line that rolls across the screens like a news ticker.
+   Under any of the first three, a card with its ticker on (a switch on each
+   card, see deck.js) has its words run together onto one line that rolls
+   across the screens like a news ticker.
 
    The host is authoritative and sends a full snapshot twenty times a second.
    Snapshots carry no pictures: those go once each, in chunks, to a guest
@@ -41,12 +42,12 @@ import {
   MAX_SCREENS,
 } from "./p2p.js";
 import { qrSvg } from "./qr.js";
-import { fillImage } from "./deck.js";
+import { fillImage, readTickerSpeed } from "./deck.js";
 import { getImage, readSetting, writeSetting } from "./store.js";
 import { closeModal, openModal, toast } from "./ui.js";
 import { icon } from "./icons.js";
 import { startViewing } from "./viewer.js";
-import { TICKER_SPEEDS } from "./ticker.js";
+import { showsTicker } from "./ticker.js";
 
 const SNAPSHOT_MS = 50;
 // A guest pings every half second. Silence for this long is a guest that
@@ -169,18 +170,6 @@ export function bigScreen() {
     })),
     identify: wall.identify,
   };
-}
-
-/* The ticker as the screens are told it, or null when it is off. The
-   presenter here draws the same, so what is seen here is what they show. */
-export function shareTicker() {
-  if (!host || shareMode() === "send" || readSetting("shareTicker") !== "on") return null;
-  return { speed: tickerSpeed() };
-}
-
-function tickerSpeed() {
-  const speed = readSetting("tickerSpeed");
-  return Object.hasOwn(TICKER_SPEEDS, speed) ? speed : "normal";
 }
 
 export function isHosting() {
@@ -669,8 +658,8 @@ function snapshot(screen) {
   if (!sending && f?.presenting && f.card) {
     message.presenting = true;
     message.card = wireCard(f.card);
-    const ticker = shareTicker();
-    if (ticker) message.ticker = ticker;
+    // The card's own ticker, which the presenter here draws the same.
+    if (showsTicker(f.card)) message.ticker = { speed: readTickerSpeed(f.card.tickerSpeed) };
   }
 
   return message;
@@ -717,6 +706,8 @@ function wireDeckCard(card) {
           }
         : { type: "text", text: layer.text, size: layer.size, align: layer.align, hidden: layer.hidden }
     ),
+    ticker: card.ticker === true,
+    tickerSpeed: card.tickerSpeed,
   };
 }
 
@@ -932,7 +923,6 @@ function renderSheet() {
 
   renderWall();
   renderGuests();
-  renderTicker();
 }
 
 /* The screens of a Big Screen as they sit, numbered by place, drawn where
@@ -1060,21 +1050,6 @@ function renderGuests() {
     )
     .join("");
   el.guests.dataset.ids = list.join(" ");
-}
-
-function renderTicker() {
-  const on = readSetting("shareTicker") === "on";
-  el.tickerRow.hidden = shareMode() === "send";
-  el.ticker.setAttribute("aria-pressed", String(on));
-  el.ticker.classList.toggle("btn-primary", on);
-  el.tickerLabel.textContent = on ? "Ticker on" : "Ticker off";
-  el.tickerSpeed.hidden = !on;
-  const speed = tickerSpeed();
-  el.tickerSpeedButtons.forEach((btn) => {
-    const active = btn.dataset.tickerSpeed === speed;
-    btn.classList.toggle("active", active);
-    btn.setAttribute("aria-pressed", String(active));
-  });
 }
 
 function tileAt(place) {
@@ -1265,19 +1240,6 @@ function wireSheet() {
     changed();
   });
 
-  el.ticker.addEventListener("click", () => {
-    writeSetting("shareTicker", readSetting("shareTicker") === "on" ? null : "on");
-    changed();
-    shareNow();
-  });
-  el.tickerSpeed.addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-ticker-speed]");
-    if (!btn || !Object.hasOwn(TICKER_SPEEDS, btn.dataset.tickerSpeed)) return;
-    writeSetting("tickerSpeed", btn.dataset.tickerSpeed);
-    changed();
-    shareNow();
-  });
-
   el.start.addEventListener("click", () => {
     status = { status: "idle" };
     startHosting();
@@ -1352,11 +1314,6 @@ export function initShare({ getFrame }) {
   el.wallLines = document.getElementById("wallLines");
   el.wallLinesLabel = document.getElementById("wallLinesLabel");
   el.guests = document.getElementById("shareGuests");
-  el.tickerRow = document.getElementById("tickerRow");
-  el.ticker = document.getElementById("shareTicker");
-  el.tickerLabel = document.getElementById("shareTickerLabel");
-  el.tickerSpeed = document.getElementById("tickerSpeed");
-  el.tickerSpeedButtons = el.tickerSpeed.querySelectorAll("[data-ticker-speed]");
 
   el.host = document.getElementById("shareHost");
   if (el.host) el.host.textContent = location.host;

@@ -19,6 +19,17 @@ export const LAYOUTS = [
 
 export const DEFAULT_LAYOUT = "image-center";
 
+/* A card can show its words as a news ticker instead: every line run
+   together onto one line that rolls across the screen. Each card has its
+   own switch and speed, so one card in a deck can roll while the rest
+   stand still. */
+export const TICKER_SPEED_IDS = ["slow", "normal", "fast"];
+export const DEFAULT_TICKER_SPEED = "normal";
+
+export function readTickerSpeed(speed) {
+  return TICKER_SPEED_IDS.includes(speed) ? speed : DEFAULT_TICKER_SPEED;
+}
+
 export const TEXT_SIZES = [
   { id: "s", label: "Small" },
   { id: "m", label: "Medium" },
@@ -66,6 +77,8 @@ export function makeCard(text = "") {
     id: id(),
     layout: DEFAULT_LAYOUT,
     layers: [makeTextLayer(text)],
+    ticker: false,
+    tickerSpeed: DEFAULT_TICKER_SPEED,
   };
 }
 
@@ -82,6 +95,8 @@ export function normaliseDeck(raw) {
     id: card?.id || id(),
     layout: LAYOUTS.some((l) => l.id === card?.layout) ? card.layout : DEFAULT_LAYOUT,
     layers: Array.isArray(card?.layers) ? card.layers.map(normaliseLayer).filter(Boolean) : [],
+    ticker: card?.ticker === true,
+    tickerSpeed: readTickerSpeed(card?.tickerSpeed),
   }));
 
   return { version: 1, cards };

@@ -211,6 +211,22 @@
 .card-text.size-l { font-size: 12cqw; }
 .card-text.size-xl { font-size: 18cqw; }
 
+/* On a Big Screen the card is as wide as every screen together, so sizing
+   the words against its width would only make them bigger and wrap them in
+   the same places as on one screen. Past the editor's 16:10 they are sized
+   against its height instead, the same size as the card is tall as in the
+   editor, and the spare width goes to the line: words that wrap on one
+   screen run straight across two or more when they fit. A wall narrower
+   than 16:10 sizes them as before. */
+.on-wall .card-canvas {
+  gap: min(3cqw, 4.8cqh);
+  --pad: min(5cqw, 8cqh);
+}
+.on-wall .card-text.size-s { font-size: min(5cqw, 8cqh); }
+.on-wall .card-text.size-m { font-size: min(8cqw, 12.8cqh); }
+.on-wall .card-text.size-l { font-size: min(12cqw, 19.2cqh); }
+.on-wall .card-text.size-xl { font-size: min(18cqw, 28.8cqh); }
+
 .card-text-empty {
   opacity: 0.45;
   font-style: italic;
@@ -578,6 +594,15 @@ body.presenting { overflow: hidden; }
 }
 .present-exit:hover { opacity: 1; }
 .present-exit svg { width: 20px; height: 20px; }
+
+/* Beside the exit button: switches the shown card's ticker. Lit while on. */
+.present-ticker { right: calc(max(10px, env(safe-area-inset-right)) + 52px); }
+.present-ticker[aria-pressed="true"] {
+  color: var(--card-bg);
+  background: var(--card-ink);
+  opacity: 0.8;
+}
+.present-ticker:disabled { display: none; }
 
 .present-count {
   position: absolute;
@@ -1031,6 +1056,7 @@ body.viewing { overflow: hidden; }
 .viewer.lining:not(.showing) #viewerCanvas { display: none; }
 
 #viewerCanvas { --pad: 5cqw; }
+.viewer.on-wall #viewerCanvas { --pad: min(5cqw, 8cqh); }
 
 /* This screen's number, big enough to read from where the screens are being
    arranged, over the card if one is showing. */

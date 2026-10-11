@@ -15,7 +15,8 @@
 import { escapeHtml } from "./ui.js";
 import { fillImage } from "./deck.js";
 
-export const TICKER_SPEEDS = { slow: 1.5, normal: 3, fast: 5 }; // letters a second, roughly, in em
+// Letters a second, roughly, in em, for each of deck.js's TICKER_SPEED_IDS.
+export const TICKER_SPEEDS = { slow: 1.5, normal: 3, fast: 5 };
 const LETTER_EM = 0.55; // a rough width of one letter, in em
 const GAP = "   •   ";
 const SIZE_CLASS = { s: "size-s", m: "size-m", l: "size-l", xl: "size-xl" };
@@ -34,6 +35,12 @@ export function tickerText(card) {
 
 export function hasTickerText(card) {
   return tickerText(card) !== "";
+}
+
+// Whether a card is drawn as a ticker: its own switch is on and it has
+// words to roll. A card with only a picture is drawn as a card.
+export function showsTicker(card) {
+  return card?.ticker === true && hasTickerText(card);
 }
 
 /* `now` is the clock every screen agrees on, in milliseconds; `speed` is a

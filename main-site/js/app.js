@@ -24,9 +24,11 @@ import {
   cardSummary,
   soleImage,
   fillImage,
+  readTickerSpeed,
+  TICKER_SPEED_IDS,
 } from "./deck.js";
 import { renderCard } from "./render.js";
-import { renderTicker, hasTickerText } from "./ticker.js";
+import { renderTicker, hasTickerText, showsTicker } from "./ticker.js";
 import {
   initShare,
   isHosting,
@@ -34,7 +36,6 @@ import {
   shareMode,
   shareNow,
   shareDeckChanged,
-  shareTicker,
   bigScreen,
 } from "./share.js";
 import { initViewer } from "./viewer.js";
@@ -364,6 +365,27 @@ function renderLayoutPicker() {
   });
 }
 
+function renderTickerPanel() {
+  const card = currentCard();
+  const on = card.ticker === true;
+  el.cardTicker.setAttribute("aria-pressed", String(on));
+  el.cardTicker.classList.toggle("btn-primary", on);
+  el.cardTickerLabel.textContent = on ? "Ticker on" : "Ticker off";
+  el.tickerSpeed.hidden = !on;
+  const speed = readTickerSpeed(card.tickerSpeed);
+  el.tickerSpeed.querySelectorAll("[data-ticker-speed]").forEach((btn) => {
+    const active = btn.dataset.tickerSpeed === speed;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function setTicker(card, on) {
+  card.ticker = on;
+  card.tickerSpeed = readTickerSpeed(card.tickerSpeed);
+  persist();
+}
+
 function renderCardStrip() {
   el.cardStrip.innerHTML = deck.cards
     .map(
@@ -383,6 +405,7 @@ function renderCardStrip() {
 function renderAll() {
   renderCardStrip();
   renderLayoutPicker();
+  renderTickerPanel();
   renderLayerList();
   renderInspector();
   renderPreview();
@@ -585,12 +608,14 @@ async function showPresentCard() {
   const remote = isPresenterView();
   el.present.classList.toggle("remote", remote);
   el.presentCount.textContent = `${cardIndex + 1} / ${deck.cards.length}`;
+  renderPresentTicker();
 
   // Sent before drawing here, so the other screen is not kept waiting on
   // this one's image reads.
   shareNow();
 
   if (!remote) {
+    el.present.classList.remove("on-wall");
     await drawShown(currentCard(), el.presentCanvas);
     return;
   }
@@ -617,15 +642,29 @@ async function showPresentCard() {
   ]);
 }
 
-/* The card as the other screens show it: as a ticker while sharing with the
-   ticker on, so what is seen here is what they show. The next card stays a
-   card, to read ahead. */
+/* The card as it is shown, here and on any other screen: as a ticker when
+   its own ticker is on, so what is seen here is what they show. The next
+   card stays a card, to read ahead. */
 function drawShown(card, target) {
-  const ticker = shareTicker();
-  if (ticker && hasTickerText(card)) {
-    return renderTicker(card, target, { resolveImage: imageUrl, speed: ticker.speed });
+  if (showsTicker(card)) {
+    return renderTicker(card, target, { resolveImage: imageUrl, speed: readTickerSpeed(card.tickerSpeed) });
   }
   return renderCard(card, target, { presenting: true });
+}
+
+// The presenter's ticker button, for the card on show. Not there for a card
+// with no words to roll.
+function renderPresentTicker() {
+  const card = currentCard();
+  el.presentTicker.disabled = !hasTickerText(card);
+  el.presentTicker.setAttribute("aria-pressed", String(card.ticker === true));
+}
+
+function togglePresentTicker() {
+  const card = currentCard();
+  if (!hasTickerText(card)) return;
+  setTicker(card, !card.ticker);
+  showPresentCard();
 }
 
 /* The frames take the shape of the whole Big Screen, bezels and all, so
@@ -635,6 +674,8 @@ function drawShown(card, target) {
 function showWallGrid(wall) {
   el.present.style.setProperty("--wall-aspect", wall ? wall.aspect : 1.6);
   el.remoteGrid.hidden = !wall;
+  // Words laid out as the screens lay them out; see .on-wall in style.css.
+  el.present.classList.toggle("on-wall", !!wall);
   if (!wall) return;
 
   el.remoteGrid.style.setProperty("--rows", wall.rows);
@@ -849,6 +890,18 @@ function wireEditor() {
     persist();
   });
 
+  el.cardTicker.addEventListener("click", () => {
+    setTicker(currentCard(), !currentCard().ticker);
+    renderTickerPanel();
+  });
+  el.tickerSpeed.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-ticker-speed]");
+    if (!btn || !TICKER_SPEED_IDS.includes(btn.dataset.tickerSpeed)) return;
+    currentCard().tickerSpeed = btn.dataset.tickerSpeed;
+    renderTickerPanel();
+    persist();
+  });
+
   el.cardStrip.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-card]");
     if (!btn) return;
@@ -885,6 +938,7 @@ function wirePresenter() {
   document.getElementById("presentPrev").addEventListener("click", () => stepCard(-1));
   document.getElementById("presentNext").addEventListener("click", () => stepCard(1));
   document.getElementById("presentExit").addEventListener("click", exitPresent);
+  el.presentTicker.addEventListener("click", togglePresentTicker);
 
   document.addEventListener("keydown", (e) => {
     if (!presenting) return;
@@ -896,6 +950,8 @@ function wirePresenter() {
       stepCard(-1);
     } else if (e.key === "Escape") {
       exitPresent();
+    } else if ((e.key === "t" || e.key === "T") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      togglePresentTicker();
     }
   });
 
@@ -943,6 +999,10 @@ function boot() {
   el.present = document.getElementById("present");
   el.presentCanvas = document.getElementById("presentCanvas");
   el.presentCount = document.getElementById("presentCount");
+  el.presentTicker = document.getElementById("presentTicker");
+  el.cardTicker = document.getElementById("cardTicker");
+  el.cardTickerLabel = document.getElementById("cardTickerLabel");
+  el.tickerSpeed = document.getElementById("tickerSpeed");
   el.remoteNow = document.getElementById("remoteNow");
   el.remoteNext = document.getElementById("remoteNext");
   el.remoteStatus = document.getElementById("remoteStatus");
