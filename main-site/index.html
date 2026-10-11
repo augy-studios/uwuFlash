@@ -98,6 +98,24 @@
 
         <section class="panel glass">
             <div class="panel-head">
+                <h2>Ticker</h2>
+            </div>
+            <!-- This card only. Also switched from the presenter. -->
+            <div class="ticker-row">
+                <button class="btn" id="cardTicker" type="button" aria-pressed="false">
+                    <span data-icon="ticker"></span><span id="cardTickerLabel">Ticker off</span>
+                </button>
+                <div class="seg" id="tickerSpeed" role="group" aria-label="Ticker speed" hidden>
+                    <button class="seg-btn" type="button" data-ticker-speed="slow" aria-pressed="false">Slow</button>
+                    <button class="seg-btn" type="button" data-ticker-speed="normal" aria-pressed="false">Normal</button>
+                    <button class="seg-btn" type="button" data-ticker-speed="fast" aria-pressed="false">Fast</button>
+                </div>
+            </div>
+            <p class="mode-note">With the ticker on, this card's words roll along one line, round and round, like a news ticker, when it is shown.</p>
+        </section>
+
+        <section class="panel glass">
+            <div class="panel-head">
                 <h2>Layers</h2>
             </div>
             <ul class="layer-list" id="layerList"></ul>
@@ -157,6 +175,10 @@
         </div>
         <button class="present-tap prev" id="presentPrev" type="button" aria-label="Previous card"></button>
         <button class="present-tap next" id="presentNext" type="button" aria-label="Next card"></button>
+        <button class="present-exit present-ticker" id="presentTicker" type="button" aria-pressed="false"
+            aria-label="Ticker for this card" title="Ticker for this card (T)">
+            <span data-icon="ticker"></span>
+        </button>
         <button class="present-exit" id="presentExit" type="button" aria-label="Stop presenting">
             <span data-icon="exit"></span>
         </button>
@@ -229,19 +251,6 @@
                 <button class="seg-btn" type="button" data-share-mode="send" aria-pressed="false">Send cards</button>
             </div>
             <p class="mode-note" id="shareModeNote"></p>
-
-            <!-- Not under Send, which shows nothing. -->
-            <div class="ticker-row" id="tickerRow">
-                <button class="btn" id="shareTicker" type="button" aria-pressed="false">
-                    <span data-icon="ticker"></span><span id="shareTickerLabel">Ticker off</span>
-                </button>
-                <div class="seg" id="tickerSpeed" role="group" aria-label="Ticker speed" hidden>
-                    <button class="seg-btn" type="button" data-ticker-speed="slow" aria-pressed="false">Slow</button>
-                    <button class="seg-btn" type="button" data-ticker-speed="normal" aria-pressed="false">Normal</button>
-                    <button class="seg-btn" type="button" data-ticker-speed="fast" aria-pressed="false">Fast</button>
-                </div>
-            </div>
-            <p class="mode-note">With the ticker on, the words on a shown card roll along one line, round and round, like a news ticker.</p>
 
             <div class="share-idle" id="shareIdle">
                 <button class="btn btn-primary" id="shareStart" type="button">

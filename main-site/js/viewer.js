@@ -14,7 +14,7 @@
    shows its number over everything, so the screens can be put in order, or
    lines across the whole wall, so the bezels between them can be set.
 
-   With the host's ticker on, the card's words roll along one line instead,
+   With the card's ticker on, its words roll along one line instead,
    timed by the host's clock so that every screen of a Big Screen has the
    line in the same place and it runs straight on from one to the next.
 
@@ -30,7 +30,7 @@
 import { Guest, normaliseCode, isValidCode, MAX_SHARED_IMAGES, MAX_SCREENS } from "./p2p.js";
 import { renderCard } from "./render.js";
 import { renderTicker, hasTickerText, TICKER_SPEEDS } from "./ticker.js";
-import { LAYOUTS, DEFAULT_LAYOUT, TEXT_SIZES, readFocus } from "./deck.js";
+import { LAYOUTS, DEFAULT_LAYOUT, TEXT_SIZES, readFocus, readTickerSpeed } from "./deck.js";
 import { COLOR_THEMES, initTheme, showColorTheme } from "./theme.js";
 import { readSetting, writeSetting } from "./store.js";
 
@@ -454,6 +454,8 @@ function readCard(card) {
   return {
     layout: LAYOUTS.some((l) => l.id === card.layout) ? card.layout : DEFAULT_LAYOUT,
     layers,
+    ticker: card.ticker === true,
+    tickerSpeed: readTickerSpeed(card.tickerSpeed),
   };
 }
 
@@ -612,6 +614,8 @@ function placeStage() {
 function apply() {
   placeStage();
   el.viewer.classList.toggle("lining", !!(state?.wall?.lines && status === "connected" && !ended));
+  // Words sized for the whole wall's width; see .on-wall in style.css.
+  el.viewer.classList.toggle("on-wall", !!state?.wall);
   const card = state?.presenting ? state.card : null;
   if (!card) {
     if (shownKey) showNothing();

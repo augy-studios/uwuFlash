@@ -59,10 +59,13 @@ Each seam keeps its own width. A screen that drops out for a moment comes back
 to the same place; one gone for longer than a few seconds is let go, and the
 **x** on a screen removes it at any time.
 
-**Run the words as a ticker.** With **Ticker** on, the words of the card being
-shown run together on one line that rolls round and round like a news ticker,
-at a speed you pick. On a Big Screen it runs straight on from one screen to the
-next.
+**Run the words as a ticker.** Each card has its own **Ticker** switch, under
+the card in the editor or on the ticker button while presenting (or press
+**T**). With it on, that card's words run together on one line that rolls
+round and round like a news ticker, at a speed you pick for the card. On a Big
+Screen it runs straight on from one screen to the next. With it off, a Big
+Screen gives the words the width of every screen together, so a line that
+would wrap on one screen runs straight across two or more when it fits.
 
 **Send your cards to another device.** The same sharing, with **Send cards**
 picked instead, copies your whole deck, pictures included, to the other
