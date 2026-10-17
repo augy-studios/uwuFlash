@@ -43,7 +43,8 @@ puts it on the other screen and turns yours into a presenter view, with the
 next card underneath, like a projector. The other screen keeps the card's
 shape whatever its own, so a picture is framed the same on a phone as on a
 laptop, and nothing ends up under a notch or a rounded corner. It stays awake
-while it is showing; turn its brightness up yourself, since a web page cannot.
+while it is showing; turn its brightness up yourself, since a web page cannot
+(the Android app does it for you).
 
 **Make one big screen out of several.** **Big Screen** works like Extend, but
 any number of devices up to twelve can join with the same code, and together
@@ -80,6 +81,13 @@ card is your colour with near black text, and in dark mode it is near black
 with your colour as the text, which is what makes it readable across a room in
 either.
 
+**Use the Android app for more.** The same app, with what a web page cannot
+do: the screen at full brightness while a card is up, real full screen, the
+volume keys to change cards, a flick of the wrist to change them too, speaking
+a card's words instead of typing them, and sharing between phones with the app
+with no wifi or internet at all, over Bluetooth. It updates itself. Download
+it from [the releases](https://github.com/augy-studios/uwuFlash/releases/latest).
+
 ## Using it
 
 Open **flash.uwuapps.org**. Install it to the home screen if you want it to
@@ -89,9 +97,11 @@ open full screen like an app.
 - **Add text** and **Add image** add layers to the current card.
 - The four buttons under **Where the image sits** set the arrangement.
 - **New card**, **Duplicate** and the arrows manage the stack.
-- The play button at the top right starts presenting. Escape, the exit button,
-  or leaving fullscreen stops it.
-- The screen button beside it shares. Choose Mirror or Extend, press **Start
+- The buttons down the right of the screen are the Edge Tray. Its arrow tab
+  slides it out of the way, and back.
+- The play button in the tray starts presenting. Escape, the exit button, or
+  leaving fullscreen stops it.
+- The screen button above it shares. Choose Mirror or Extend, press **Start
   sharing**, and scan the QR code with the other device (or type the code into
   **Be the other device** on it). Then press play.
 - For **Big Screen**, join from every screen the same way. Line them up, press
@@ -111,7 +121,9 @@ Your deck is saved as you work and is still there next time you open it.
 
 Both devices need to be on the same wifi, or one sharing a hotspot that the
 other has joined. Guest, hotel, university and office wifi often blocks
-devices from reaching each other; the hotspot is the fix.
+devices from reaching each other; the hotspot is the fix. Phones that both
+have the Android app need neither: with Bluetooth on, they find each other
+directly, through Google's Nearby Connections, and share with no network.
 
 Cards go straight from one device to the other over an encrypted connection.
 To find each other, the two devices briefly use a free public introduction
@@ -128,7 +140,12 @@ The app is in [`main-site/`](main-site/) and its own
 [README](main-site/README.md) covers the file layout and how to run it. There
 is no build step: static HTML, CSS and ES modules.
 
-Three specifications at the root are the source of truth, and each is shared
+The Android app is in [`android/`](android/): the site in Capacitor, with a
+native plugin for what a web page cannot do. Its
+[README](android/README.md) covers what it adds and how to build it, in one
+command, into [`release/`](release/).
+
+The specifications at the root are the source of truth, and each is shared
 across the uwuapps projects rather than written for this one:
 
 | File | What it governs |
@@ -137,6 +154,8 @@ across the uwuapps projects rather than written for this one:
 | `uwuapps-retrofit-time-mode.md` | The procedure for adding time based mode to an app that already has the two button toggle. |
 | `update-bar-spec.md` | The update prompt bar and the service worker rules it depends on. |
 | `STUN-p2p-spec.md` | Peer-to-peer pairing for screen sharing: STUN only, no TURN relay, no backend. |
+| `edge-tray-spec.md` | The Edge Tray: the column of buttons top right. |
+| `android-app-spec.md` | Wrapping the site in Capacitor as an Android app, and releasing it. |
 
 When one of these conflicts with the code, the specification is right and the
 code is a bug.

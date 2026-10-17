@@ -23,6 +23,22 @@
             document.documentElement.setAttribute("data-mode", m);
             document.documentElement.setAttribute("data-color-theme", c);
         })();
+
+        // The Edge Tray, left collapsed last time, painted collapsed from the
+        // first frame (edge-tray-spec.md 6.4). Keep the key in sync with
+        // TRAY_KEY in js/tray.js, which removes the class a frame later.
+        try {
+            if (localStorage.getItem("uwuflash.trayOpen") === "0")
+                document.documentElement.classList.add("tray-start-collapsed");
+        } catch (e) {}
+
+        // In the Android app, which hides the status bar, nothing leaves room
+        // for it. From the user agent, so it holds from the first paint; see
+        // js/app-bridge.js.
+        if (/uwuFlashApp\/\d+/.test(navigator.userAgent)) {
+            document.documentElement.setAttribute("data-app", "android");
+            document.documentElement.setAttribute("data-statusbar", "hidden");
+        }
     </script>
 
     <!-- Google tag (gtag.js) -->
@@ -66,23 +82,47 @@
 </head>
 
 <body>
+    <!-- The Edge Tray (edge-tray-spec.md, js/tray.js): Share and Present, then
+         the global actions. In the Android app, js/app-notify.js and
+         js/app-update.js add the bell and "Check for updates" above Theme. -->
+    <div class="hud-right">
+        <div id="tray" class="tray">
+            <button id="trayTab" class="tray-tab" type="button"
+                aria-controls="trayButtons" aria-expanded="true" aria-label="Hide menu" title="Hide menu">
+                <!-- Chevron pointing right. Rotated by CSS when collapsed. -->
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m9 5 7 7-7 7" />
+                </svg>
+            </button>
+            <div id="trayButtons" class="tray-buttons">
+                <button class="glass-btn" id="shareBtn" type="button" aria-haspopup="dialog"
+                    aria-label="Share screen" title="Share screen">
+                    <span data-icon="cast"></span>
+                </button>
+                <button class="glass-btn" id="presentBtn" type="button"
+                    aria-label="Present fullscreen" title="Present fullscreen">
+                    <span data-icon="play"></span>
+                </button>
+                <span class="tray-rule" aria-hidden="true"></span>
+                <button class="glass-btn" id="themeBtn" type="button" aria-haspopup="dialog"
+                    aria-label="Theme" title="Theme">
+                    <span data-icon="sun"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <main class="app">
-        <header class="topbar">
+        <!-- The brand line: the logo and the name, and nothing else. Not a
+             link or a button: there is only the one page. -->
+        <header class="brand">
             <!-- UFCS-192.png rather than UFCS-main.png: the same artwork at
                  11KB instead of 390KB, which is 2250px of detail nobody can
                  see in a 34px box. Decorative, so the alt is empty: the site
                  name is the <h1> right beside it. -->
-            <img class="topbar-logo" src="/UFCS-192.png" alt="" width="34" height="34" decoding="async">
+            <img class="brand-logo" src="/UFCS-192.png" alt="" width="34" height="34" decoding="async">
             <h1>uwuFlash</h1>
-            <button class="icon-btn" id="shareBtn" type="button" aria-label="Share screen">
-                <span data-icon="cast"></span>
-            </button>
-            <button class="icon-btn" id="presentBtn" type="button" aria-label="Present fullscreen">
-                <span data-icon="play"></span>
-            </button>
-            <button class="icon-btn" id="themeBtn" type="button" aria-label="Theme">
-                <span data-icon="sun"></span>
-            </button>
         </header>
 
         <section class="card-frame glass" aria-label="Card preview">
@@ -185,6 +225,12 @@
         <button class="present-exit present-ticker" id="presentTicker" type="button" aria-pressed="false"
             aria-label="Ticker for this card" title="Ticker for this card (T)">
             <span data-icon="ticker"></span>
+        </button>
+        <!-- The Android app only, on a phone with a gyroscope: flick the
+             wrist to change cards. Shown by js/app.js. -->
+        <button class="present-exit present-flick" id="presentFlick" type="button" aria-pressed="false"
+            aria-label="Flick to change cards" title="Flick to change cards" hidden>
+            <span data-icon="flick"></span>
         </button>
         <button class="present-exit" id="presentExit" type="button" aria-label="Stop presenting">
             <span data-icon="exit"></span>

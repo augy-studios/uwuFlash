@@ -9,7 +9,21 @@ import {
 } from "./theme.js";
 import { hydrateIcons, openModal, closeModal, escapeHtml, toast } from "./ui.js";
 import { initUpdateBar } from "./update.js";
-import { loadDeck, saveDeck, putImage, forgetImageUrl, pruneImages, imageUrl } from "./store.js";
+import { initTray } from "./tray.js";
+import { AppBridge } from "./app-bridge.js";
+import { initAppUpdate } from "./app-update.js";
+import { initAppNotify } from "./app-notify.js";
+import { appScreen, holdScreen, captureKeys, canFlick, watchFlick, canListen, listen } from "./screen.js";
+import {
+  loadDeck,
+  saveDeck,
+  putImage,
+  forgetImageUrl,
+  pruneImages,
+  imageUrl,
+  readSetting,
+  writeSetting,
+} from "./store.js";
 import {
   LAYOUTS,
   TEXT_SIZES,
@@ -241,6 +255,12 @@ function renderInspector() {
         <span class="field-label">Text</span>
         <textarea id="layerText" rows="3" placeholder="Type what the room should read">${escapeHtml(layer.text)}</textarea>
       </label>
+      ${
+        // The Android app only: Android's own speech screen (js/screen.js).
+        canListen()
+          ? `<div class="button-row"><button class="btn" type="button" id="layerSpeak"><span data-icon="mic"></span>Speak</button></div>`
+          : ""
+      }
       <div class="field">
         <span class="field-label">Size</span>
         <div class="seg" id="layerSize">
@@ -267,6 +287,21 @@ function renderInspector() {
     const textarea = el.inspector.querySelector("#layerText");
     textarea.addEventListener("input", () => {
       layer.text = textarea.value;
+      renderPreview();
+      renderLayerList();
+      renderCardStrip();
+      persist();
+    });
+
+    // What's said goes on a line of its own after any words already there,
+    // so speaking never throws away what was typed.
+    hydrateIcons(el.inspector);
+    el.inspector.querySelector("#layerSpeak")?.addEventListener("click", async () => {
+      const said = await listen("Say what the card should read");
+      if (!said) return;
+      const before = layer.text.replace(/\s+$/, "");
+      layer.text = before ? `${before}\n${said}` : said;
+      if (selectedLayerId === layer.id) renderInspector();
       renderPreview();
       renderLayerList();
       renderCardStrip();
@@ -721,6 +756,20 @@ async function enterPresent() {
   document.body.classList.add("presenting");
   await showPresentCard();
 
+  // In the Android app: the screen kept on, at full brightness, every bar
+  // hidden, and the volume keys and Back working the cards (js/screen.js).
+  // Its WebView would leave the browser's full screen at once, which would
+  // close the presenter through the fullscreenchange handler below.
+  if (await appScreen()) {
+    if (!presenting) return;
+    appPresenting = true;
+    holdScreen("present", { awake: true, bright: true, immersive: true });
+    captureKeys(onPresentKey);
+    renderPresentFlick();
+    if (flickOn()) watchFlick(stepCard);
+    return;
+  }
+
   // Fullscreen is a request, not a guarantee: iOS Safari refuses it outside
   // an installed PWA. The presenter is styled to fill the viewport on its
   // own, so a refusal costs the status bar and nothing else.
@@ -745,6 +794,13 @@ async function exitPresent() {
   // The other screen goes back to waiting at once, not on the next beat.
   shareNow();
 
+  if (appPresenting) {
+    appPresenting = false;
+    holdScreen("present", null);
+    captureKeys(null);
+    watchFlick(null);
+  }
+
   try {
     await wakeLock?.release();
   } catch {
@@ -764,6 +820,37 @@ async function exitPresent() {
 }
 
 let wakeLock = null;
+// Presenting with the Android app holding the screen, rather than the browser.
+let appPresenting = false;
+
+// The volume keys and Back while presenting in the app: down for the next
+// card, up for the one before, held for the ticker, as the arrows and T do.
+function onPresentKey(key) {
+  if (key === "next") stepCard(1);
+  else if (key === "previous") stepCard(-1);
+  else if (key === "hold") togglePresentTicker();
+  else if (key === "back") exitPresent();
+}
+
+/* Flick to change cards, in the app on a phone with a gyroscope: off until
+   switched on with its button in the presenter, as waving a sign about
+   shouldn't change it, and remembered once on. */
+function flickOn() {
+  return canFlick() && readSetting("flick") === "1";
+}
+
+function renderPresentFlick() {
+  el.presentFlick.hidden = !appPresenting || !canFlick();
+  el.presentFlick.setAttribute("aria-pressed", String(flickOn()));
+}
+
+function togglePresentFlick() {
+  const on = !flickOn();
+  writeSetting("flick", on ? "1" : null);
+  if (appPresenting) watchFlick(on ? stepCard : null);
+  renderPresentFlick();
+  toast(on ? "Flick your wrist right for the next card, left for the one before." : "Flick to change cards is off.");
+}
 
 // A screen lock is dropped when the tab is hidden and is not restored on its
 // own, so a presenter who takes a call comes back to a screen that dims.
@@ -951,6 +1038,7 @@ function wirePresenter() {
   document.getElementById("presentNext").addEventListener("click", () => stepCard(1));
   document.getElementById("presentExit").addEventListener("click", exitPresent);
   el.presentTicker.addEventListener("click", togglePresentTicker);
+  el.presentFlick.addEventListener("click", togglePresentFlick);
 
   document.addEventListener("keydown", (e) => {
     if (!presenting) return;
@@ -995,6 +1083,7 @@ function wirePresenter() {
 
 function boot() {
   initTheme();
+  initTray();
   hydrateIcons();
   updateThemeButtonIcon();
   buildThemeModal();
@@ -1012,6 +1101,7 @@ function boot() {
   el.presentCanvas = document.getElementById("presentCanvas");
   el.presentCount = document.getElementById("presentCount");
   el.presentTicker = document.getElementById("presentTicker");
+  el.presentFlick = document.getElementById("presentFlick");
   el.cardTicker = document.getElementById("cardTicker");
   el.cardTickerLabel = document.getElementById("cardTickerLabel");
   el.tickerSpeed = document.getElementById("tickerSpeed");
@@ -1061,6 +1151,14 @@ function boot() {
   });
 
   initUpdateBar();
+
+  // The Android app's own: its updates and the bell, in the Edge Tray, and
+  // the Speak button, once the app has said it can (js/app-bridge.js).
+  initAppUpdate();
+  initAppNotify();
+  AppBridge.ready(5000).then((inApp) => {
+    if (inApp && canListen()) renderInspector();
+  });
 }
 
 if (document.readyState === "loading") {

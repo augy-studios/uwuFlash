@@ -6,7 +6,15 @@
    free public broker introduces the two, and after that nothing passes
    through a server: no TURN relay, no backend, no account. The cost, stated
    in the spec, is that both devices have to be able to reach each other
-   directly, which in practice means the same wifi or a hotspot. */
+   directly, which in practice means the same wifi or a hotspot.
+
+   In the Android app there's a second way, beside PeerJS: Google's Nearby
+   Connections, phone to phone over Bluetooth and direct wifi, with no
+   network and no broker at all (js/nearby.js). The host takes screens from
+   both at once; a screen tries both and keeps whichever connects first. Its
+   links look the same as PeerJS's, so nothing past this module can tell. */
+
+import { nearbyAvailable, nearbyHost, nearbyJoin } from "./nearby.js";
 
 const PEERJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js";
 const PEER_PREFIX = "uwuflash-";
@@ -173,39 +181,86 @@ export class Host extends Connection {
     super();
     this.maxGuests = maxGuests;
     this.links = new Map(); // guest peer id -> open link
+    // Nearby, in the app: "off" outside it, else its answer (js/nearby.js).
+    this.nearby = "off";
+    this.nearbySession = null;
+    // Whether screens can reach this one through PeerJS's broker just now.
+    this.online = false;
+    this.closed = false;
   }
 
-  async start(code) {
-    const Peer = await loadPeerJs();
+  /* `ask` lets the app ask for Nearby's permissions: only from a button. With
+     no network, PeerJS can't even load, and the share goes on over Nearby
+     alone if that started; otherwise the failure is thrown, as before. */
+  async start(code, { ask = false } = {}) {
     this.code = code;
     this.setStatus("connecting");
+    const nearby = this.startNearby(code, ask);
 
-    this.peer = new Peer(PEER_PREFIX + code, PEER_OPTIONS);
-    this.watchBroker();
+    let offline = null;
+    try {
+      const Peer = await loadPeerJs();
+      if (this.closed) return;
+      this.peer = new Peer(PEER_PREFIX + code, PEER_OPTIONS);
+      this.watchBroker();
 
-    this.peer.on("open", () => this.refreshStatus());
-    this.peer.on("connection", (link) => {
-      if (this.maxGuests === 1) {
-        // The newcomer replaces the incumbent.
-        for (const old of [...this.links.values()]) this.drop(old);
-      } else if (this.links.size >= this.maxGuests) {
-        link.on("open", () => {
-          link.send({ type: "full" });
-          link.close({ flush: true });
-        });
-        return;
-      }
-      this.bindLink(link);
-    });
-    this.peer.on("error", (error) => {
-      if (error?.type === "unavailable-id") {
-        this.setStatus("error", { message: describePeerError(error), taken: true });
-        return;
-      }
-      // Guests already attached do not need the broker.
-      if (this.links.size > 0 && BROKER_ERRORS.has(error?.type)) return;
-      this.setStatus("error", { message: describePeerError(error) });
-    });
+      this.peer.on("open", () => {
+        this.online = true;
+        this.refreshStatus();
+      });
+      this.peer.on("connection", (link) => this.accept(link));
+      this.peer.on("error", (error) => {
+        if (error?.type === "unavailable-id") {
+          this.setStatus("error", { message: describePeerError(error), taken: true });
+          return;
+        }
+        // Guests already attached do not need the broker, and neither do
+        // phones joining over Nearby.
+        if (BROKER_ERRORS.has(error?.type)) {
+          this.online = false;
+          if (this.links.size > 0 || this.nearby === "ready") {
+            this.refreshStatus();
+            return;
+          }
+        }
+        this.setStatus("error", { message: describePeerError(error) });
+      });
+    } catch (cause) {
+      offline = cause;
+    }
+
+    await nearby;
+    if (offline && !this.closed) {
+      if (this.nearby !== "ready") throw offline;
+      this.refreshStatus();
+    }
+  }
+
+  async startNearby(code, ask) {
+    if (!(await nearbyAvailable()) || this.closed) return;
+    const session = await nearbyHost(code, { ask, onLink: (link) => this.accept(link) });
+    if (this.closed) {
+      session.stop();
+      return;
+    }
+    this.nearbySession = session;
+    this.nearby = session.state;
+    if (this.status !== "connecting") this.refreshStatus();
+  }
+
+  // A screen knocking, by either way.
+  accept(link) {
+    if (this.maxGuests === 1) {
+      // The newcomer replaces the incumbent.
+      for (const old of [...this.links.values()]) this.drop(old);
+    } else if (this.links.size >= this.maxGuests) {
+      link.on("open", () => {
+        link.send({ type: "full" });
+        link.close({ flush: true });
+      });
+      return;
+    }
+    this.bindLink(link);
   }
 
   onLinkOpen(link) {
@@ -259,8 +314,12 @@ export class Host extends Connection {
   }
 
   close() {
+    this.closed = true;
     for (const link of [...this.links.values()]) this.drop(link);
     this.destroyPeer();
+    this.nearbySession?.stop();
+    this.nearbySession = null;
+    this.online = false;
     this.setStatus("idle");
   }
 }
@@ -273,47 +332,136 @@ export class Guest extends Connection {
   constructor({ introduce = () => ({}) } = {}) {
     super();
     this.link = null;
+    // Links on their way to opening, one each way at most. The first to open
+    // is kept and the other closed.
+    this.candidates = new Set();
     this.timer = null;
     this.introduce = introduce;
+    // Nearby, in the app: the session, and whether it's still looking.
+    this.nearbySession = null;
+    this.searching = false;
+    // What PeerJS said went wrong while Nearby was still looking, to say if
+    // Nearby finds nothing either.
+    this.webError = null;
   }
 
-  async connect(code, metadata) {
-    const Peer = await loadPeerJs();
+  /* `ask` lets the app ask for Nearby's permissions: only from a button. */
+  async connect(code, metadata, { ask = false } = {}) {
     this.setStatus("connecting");
+
+    // Nothing errors when ICE cannot find a path, or Nearby no phone; both
+    // just keep trying.
+    this.timer = setTimeout(() => {
+      if (this.status !== "connecting") return;
+      const error = this.webError;
+      this.hangUp();
+      if (error) this.setStatus("error", error);
+      else this.setStatus("unreachable");
+    }, CONNECT_TIMEOUT_MS);
+
+    const nearby = this.startNearby(code, ask);
+    let Peer;
+    try {
+      Peer = await loadPeerJs();
+    } catch (cause) {
+      // No network: Nearby alone, if it's looking.
+      if (await nearby) return;
+      clearTimeout(this.timer);
+      throw cause;
+    }
+    // Hung up meanwhile, or already in over Nearby.
+    if (this.status !== "connecting") return;
 
     this.peer = new Peer(PEER_OPTIONS);
     this.watchBroker();
 
-    // Nothing errors when ICE cannot find a path; it just keeps trying.
-    this.timer = setTimeout(() => {
-      if (this.status !== "connecting") return;
-      this.hangUp();
-      this.setStatus("unreachable");
-    }, CONNECT_TIMEOUT_MS);
-
     // once, not on: a broker reconnect fires "open" again.
     this.peer.once("open", () => {
-      this.link = this.peer.connect(PEER_PREFIX + code, { reliable: true, metadata });
-      this.bindLink(this.link);
+      if (this.status !== "connecting") return;
+      const link = this.peer.connect(PEER_PREFIX + code, { reliable: true, metadata });
+      this.candidates.add(link);
+      this.bindLink(link);
     });
     this.peer.on("error", (error) => {
       if (this.status === "connected" && BROKER_ERRORS.has(error?.type)) return;
+      const detail = { message: describePeerError(error), type: error?.type };
+      // Nobody with that code on PeerJS may be a phone sharing over Nearby
+      // alone, with no network: let Nearby keep looking.
+      if (this.status === "connecting" && this.searching) {
+        this.webError = detail;
+        this.dropWeb();
+        return;
+      }
       this.hangUp();
-      this.setStatus("error", { message: describePeerError(error), type: error?.type });
+      this.setStatus("error", detail);
     });
   }
 
+  // True once Nearby is looking for the host.
+  async startNearby(code, ask) {
+    if (!(await nearbyAvailable()) || this.status !== "connecting") return false;
+    const session = await nearbyJoin(code, {
+      ask,
+      onLink: (link) => {
+        this.candidates.add(link);
+        this.bindLink(link);
+      },
+    });
+    if (this.status !== "connecting") {
+      session.stop();
+      return false;
+    }
+    this.nearbySession = session;
+    this.searching = session.state === "searching";
+    return this.searching;
+  }
+
   onLinkOpen(link) {
-    if (link !== this.link) return;
+    if (!this.candidates.has(link) || this.link) {
+      link.close();
+      return;
+    }
+    this.candidates.delete(link);
+    this.link = link;
+    // Emptied first: closing one says so at once, and it's no candidate now.
+    const others = [...this.candidates];
+    this.candidates.clear();
+    others.forEach((other) => other.close());
     clearTimeout(this.timer);
+    // The other way is no longer needed.
+    if (link.peer.startsWith("nearby-")) {
+      this.dropWeb();
+    } else {
+      this.nearbySession?.stop();
+      this.nearbySession = null;
+    }
+    this.searching = false;
     this.setStatus("connected");
     this.send({ ...this.introduce(), type: "hello", v: PROTOCOL_VERSION });
   }
 
   onLinkClosed(link, everOpened) {
-    if (link !== this.link) return;
-    this.link = null;
-    this.setStatus(everOpened ? "dropped" : "unreachable");
+    if (link === this.link) {
+      this.link = null;
+      this.setStatus(everOpened ? "dropped" : "unreachable");
+      return;
+    }
+    if (!this.candidates.delete(link)) return;
+    // One way came to nothing: unreachable, unless the other is still trying.
+    if (this.status === "connecting" && this.candidates.size === 0 && !this.searching) {
+      this.hangUp();
+      this.setStatus("unreachable");
+    }
+  }
+
+  // PeerJS let go of, while Nearby goes on.
+  dropWeb() {
+    for (const link of [...this.candidates]) {
+      if (link.peer.startsWith("nearby-")) continue;
+      this.candidates.delete(link);
+      link.close();
+    }
+    this.destroyPeer();
   }
 
   send(message) {
@@ -331,10 +479,21 @@ export class Guest extends Connection {
     clearTimeout(this.timer);
     const link = this.link;
     const peer = this.peer;
+    const session = this.nearbySession;
     this.link = null;
     this.peer = null;
+    this.nearbySession = null;
+    this.searching = false;
+    // Emptied first: closing one says so at once, and it's no candidate now.
+    const others = [...this.candidates];
+    this.candidates.clear();
+    others.forEach((other) => other.close());
     link?.close({ flush: true });
-    setTimeout(() => peer?.destroy(), 1000);
+    // After the flush, which hanging up on Nearby would cut short.
+    setTimeout(() => {
+      peer?.destroy();
+      session?.stop();
+    }, 1000);
     this.setStatus("idle");
   }
 
@@ -343,7 +502,14 @@ export class Guest extends Connection {
     const link = this.link;
     this.link = null;
     link?.close();
+    // Emptied first: closing one says so at once, and it's no candidate now.
+    const others = [...this.candidates];
+    this.candidates.clear();
+    others.forEach((other) => other.close());
     this.destroyPeer();
+    this.nearbySession?.stop();
+    this.nearbySession = null;
+    this.searching = false;
   }
 
   close() {

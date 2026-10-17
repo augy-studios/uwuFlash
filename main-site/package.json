@@ -1,0 +1,6 @@
+{
+  "name": "uwuflash",
+  "private": true,
+  "type": "module",
+  "description": "uwuFlash: the static site and its Vercel functions (api/). No build step, no dependencies."
+}

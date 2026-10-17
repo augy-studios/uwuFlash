@@ -1,0 +1,22 @@
+{
+  "appId": "org.uwuapps.flash",
+  "appName": "uwuFlash",
+  "webDir": "www",
+  "server": {
+    "url": "https://flash.uwuapps.org",
+    "errorPath": "offline.html"
+  },
+  "android": {
+    "path": "native",
+    "appendUserAgent": "uwuFlashApp/1"
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css",
+      "initialViewportFitValueHint": "cover"
+    },
+    "PushNotifications": {
+      "presentationOptions": ["alert", "sound"]
+    }
+  }
+}

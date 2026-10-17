@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- uwuFlash for Android: see android/README.md for what each part is for. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- New versions and news (Notifications.java), only once you turn them on with the bell in
+         the Edge Tray. Asked then, on Android 13 and later; never at launch. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- The app updating itself from GitHub (UpdateActivity.java). Each update still asks you on
+         Android's own install screen. Not allowed on Google Play: drop it for a Play build. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!-- Sharing phone to phone with no wifi or internet, over Google's Nearby Connections
+         (NearbyShare.java): the sharing phone advertising its code, and the other screens
+         finding it. Asked as one "Nearby devices" prompt on Android 12 and later, when you press
+         Start sharing or Join, with location too on Android 12 itself; location alone before
+         12, where it also has to be switched on. Never used to find where anyone is. The wifi
+         ones let two phones move from Bluetooth to a faster direct wifi link once they've met.
+         BLUETOOTH_SCAN has no neverForLocation: it would hide the Bluetooth adverts Nearby
+         finds the other phone by. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="32" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
+
+    <!-- Flick to change cards while presenting (Flick.java): the gyroscope, which needs no
+         permission. A phone without one still installs the app; the presenter just has no
+         flick button. -->
+    <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="false" />
+
+    <!-- Speaking a card's words (FlashPlugin.listen): Android 11 and later hide the speech
+         screen from this app unless it's named here. The speech screen has its own microphone
+         permission, so this app needs none. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <!-- Firebase's notifications use these unless the push names its own
+             (main-site/api/_lib/fcm.js). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notification_icon" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="news" />
+
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- The site's own links open in the app, so a phone's camera scanning a share code
+                 (https://flash.uwuapps.org/?join=CODE) joins in the app: Android checks the site
+                 lists this app's signing key in main-site/.well-known/assetlinks.json. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="flash.uwuapps.org" />
+            </intent-filter>
+
+            <!-- uwu://flash/ links (MainActivity.pageFor). Only the flash host, so UwU Apps' other
+                 apps can answer uwu:// links of their own. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="uwu" android:host="flash" />
+            </intent-filter>
+        </activity>
+
+        <!-- The app updating itself, for the site's update bar and the Edge Tray's "Check for
+             updates" (UpdateActivity.java), and the installer's answers to it. Neither is
+             exported: only this app starts them. -->
+        <activity android:name=".UpdateActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/UpdateTheme" />
+        <receiver android:name=".UpdateActivity$InstallStatus"
+            android:exported="false" />
+    </application>
+</manifest>

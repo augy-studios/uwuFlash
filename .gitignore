@@ -1,0 +1,24 @@
+# Secrets, wherever one lands by mistake. android/.gitignore has the full list for the app.
+
+# The Android app's signing key and its passwords (android/README.md).
+*.keystore
+*.jks
+*.p12
+*.pfx
+keystore.properties
+
+# Firebase: the app's settings, and a service account key, which belongs in Vercel only
+# (android/FIREBASE-SETUP.md). Google names a key <project-id>-<12 hex digits>.json.
+google-services.json
+*firebase-adminsdk*.json
+*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].json
+
+# Environment files, except the example.
+.env
+.env.*
+!.env.example
+.vercel
+
+node_modules/
+
+# Not *.apk: release/<version>/*.apk is committed (release/README.md).

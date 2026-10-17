@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The page colour in dark mode: the brand green at 10% over the dark background. -->
+<resources>
+    <color name="background">#1F2821</color>
+    <color name="ic_launcher_background">#CCFFCC</color>
+    <color name="notification">#BFF5CF</color>
+</resources>

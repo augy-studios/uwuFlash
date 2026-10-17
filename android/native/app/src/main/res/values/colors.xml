@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The site's own page colour in light mode (main-site/css/theme.css): its brand green at 10%
+     over the light background, so there's no flash between the splash and the page. Dark in
+     values-night/colors.xml. -->
+<resources>
+    <color name="background">#EBF3EC</color>
+    <!-- Behind the launcher icon's artwork (mipmap-anydpi-v26) and the splash's: the logo's own
+         green. -->
+    <color name="ic_launcher_background">#CCFFCC</color>
+    <!-- Tints the notification icon in the expanded notification's header. -->
+    <color name="notification">#1F6B3D</color>
+</resources>

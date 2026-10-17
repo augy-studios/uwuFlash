@@ -33,6 +33,8 @@ import { renderTicker, hasTickerText, TICKER_SPEEDS } from "./ticker.js";
 import { LAYOUTS, DEFAULT_LAYOUT, TEXT_SIZES, readFocus, readTickerSpeed } from "./deck.js";
 import { COLOR_THEMES, initTheme, showColorTheme } from "./theme.js";
 import { readSetting, writeSetting } from "./store.js";
+import { AppBridge } from "./app-bridge.js";
+import { appScreen, holdScreen } from "./screen.js";
 
 // Measured in time, not missed snapshots: at twenty a second, three missed
 // is shorter than an ordinary wifi stall.
@@ -74,6 +76,8 @@ const IMAGE_TYPES = new Set([
 const COPY = {
   unreachable:
     "Could not reach the other device. Both have to be on the same network: join the same wifi, or turn on a hotspot on one and join it from the other. Check the code is still the one on screen.",
+  // In the Android app, which can also join phones with the app over Nearby.
+  nearby: " If both phones have the uwuFlash app, turn on Bluetooth on both and they can share with no wifi.",
   load: "Could not load sharing. Check your connection.",
 };
 
@@ -102,6 +106,13 @@ let state = null;
 let lastStateAt = 0;
 let beatTimer = null;
 let wakeLock = null;
+// In the Android app, the app holds the screen instead (js/screen.js): on, at
+// full brightness, and with every bar hidden while `appFull`.
+let appHeld = false;
+let appFull = false;
+// Whether the next join may have the app ask for Nearby's permission: only
+// when somebody pressed something, never on a reload or a quiet retry.
+let askNearby = false;
 
 const images = new Map(); // image id -> object URL, oldest first
 const incoming = new Map(); // image id -> { mime, total, parts, count }
@@ -123,11 +134,14 @@ let onImport = async () => {};
 
 /* ---- joining ---- */
 
-export function startViewing(input) {
+/* `ask`: started by somebody pressing Join or scanning a code, so the Android
+   app may ask for what joining with no wifi needs. */
+export function startViewing(input, { ask = false } = {}) {
   const next = normaliseCode(input);
   if (!isValidCode(next)) return false;
 
   code = next;
+  askNearby = ask;
   writeSetting("lastCode", code);
   writeSetting("shareRole", "guest");
 
@@ -203,8 +217,10 @@ async function join() {
     if (guest === g) onMessage(message);
   });
 
+  const ask = askNearby;
+  askNearby = false;
   try {
-    await g.connect(code);
+    await g.connect(code, undefined, { ask });
   } catch {
     if (guest !== g) return;
     guest = null;
@@ -736,7 +752,7 @@ function renderPanel() {
     badge = "Reconnecting...";
   } else if (status === "unreachable") {
     title = "Could not connect";
-    message = COPY.unreachable;
+    message = COPY.unreachable + (AppBridge.has("nearby") ? COPY.nearby : "");
     actions = ["retry", "leave"];
   } else if (status === "error") {
     title = "Could not connect";
@@ -750,14 +766,20 @@ function renderPanel() {
     title = `Screen ${state.wall.n} of ${state.wall.of}`;
     message = stale
       ? "Not hearing from the other device. It may be asleep or out of range."
-      : `Joined ${readable} as part of a Big Screen. This screen shows its piece of each card when the other device presses play. Turn every screen's brightness up to the same level so they match.`;
+      : `Joined ${readable} as part of a Big Screen. This screen shows its piece of each card when the other device presses play. ${
+          appHeld
+            ? "This one is at full brightness; turn any others up to match."
+            : "Turn every screen's brightness up to the same level so they match."
+        }`;
     actions = ["fullscreen", "leave"];
     if (stale) badge = "Connection looks stale";
   } else if (status === "connected") {
     title = "Ready";
     message = stale
       ? "Not hearing from the other device. It may be asleep or out of range."
-      : `Joined ${readable}. The cards appear here when the other device presses play. Turn this screen's brightness up so they read across the room.`;
+      : `Joined ${readable}. The cards appear here when the other device presses play.${
+          appHeld ? "" : " Turn this screen's brightness up so they read across the room."
+        }`;
     actions = ["fullscreen", "leave"];
     if (stale) badge = "Connection looks stale";
   } else {
@@ -768,7 +790,9 @@ function renderPanel() {
   setText(el.title, title);
   setText(el.message, message);
   el.retry.hidden = !actions.includes("retry");
-  el.fullscreen.hidden = !actions.includes("fullscreen") || !document.fullscreenEnabled || !!document.fullscreenElement;
+  el.fullscreen.hidden =
+    !actions.includes("fullscreen") ||
+    (appHeld ? appFull : !document.fullscreenEnabled || !!document.fullscreenElement);
   el.leave.textContent = ended || outdated ? "Back to my cards" : "Leave";
 
   const ready = offer !== null && picturesPending() === 0 && !copying;
@@ -874,6 +898,18 @@ function openViewer() {
   el.viewer.classList.remove("hidden");
   document.body.classList.add("viewing");
   beatTimer = setInterval(beat, BEAT_MS);
+  holdViewerScreen();
+}
+
+// The app's way where it has one, else the browser's Wake Lock.
+async function holdViewerScreen() {
+  if (await appScreen()) {
+    if (!open) return;
+    appHeld = true;
+    holdScreen("viewer", { awake: true, bright: true, immersive: appFull });
+    renderPanel();
+    return;
+  }
   requestWakeLock();
 }
 
@@ -919,6 +955,9 @@ export function leaveViewer() {
   el.viewer.classList.add("hidden");
   document.body.classList.remove("viewing");
   releaseWakeLock();
+  if (appHeld) holdScreen("viewer", null);
+  appHeld = false;
+  appFull = false;
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
 
   // Back to this device's own colours, which were never overwritten.
@@ -926,6 +965,14 @@ export function leaveViewer() {
 }
 
 async function toggleFullscreen() {
+  // In the app the browser's full screen leaves as soon as it's entered, so
+  // the app hides the bars itself.
+  if (appHeld) {
+    appFull = !appFull;
+    holdScreen("viewer", { awake: true, bright: true, immersive: appFull });
+    renderPanel();
+    return;
+  }
   try {
     if (document.fullscreenElement) await document.exitFullscreen();
     else await document.documentElement.requestFullscreen?.();
@@ -943,7 +990,7 @@ async function toggleFullscreen() {
 let wakeAsking = false;
 
 async function requestWakeLock() {
-  if (!open || wakeLock || wakeAsking || document.visibilityState !== "visible") return;
+  if (!open || appHeld || wakeLock || wakeAsking || document.visibilityState !== "visible") return;
   wakeAsking = true;
   try {
     const lock = (await navigator.wakeLock?.request("screen")) ?? null;
@@ -995,6 +1042,7 @@ export function initViewer({ importCards } = {}) {
   el.replace.addEventListener("click", () => copyCards(true));
   el.retry.addEventListener("click", () => {
     retryDelay = RETRY_FIRST_MS;
+    askNearby = true;
     join();
   });
   el.fullscreen.addEventListener("click", toggleFullscreen);
@@ -1038,6 +1086,7 @@ export function initViewer({ importCards } = {}) {
   }
 
   const remembered = readSetting("shareRole") === "guest" ? readSetting("lastCode") : null;
-  const initial = isValidCode(linked) ? linked : remembered;
-  if (isValidCode(initial)) startViewing(initial);
+  // A scanned code is somebody asking to join; a remembered one is a reload.
+  if (isValidCode(linked)) startViewing(linked, { ask: true });
+  else if (isValidCode(remembered)) startViewing(remembered);
 }

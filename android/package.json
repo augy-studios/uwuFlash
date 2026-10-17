@@ -1,0 +1,17 @@
+{
+  "name": "uwuflash-android",
+  "private": true,
+  "description": "uwuFlash for Android: the site at flash.uwuapps.org in Capacitor, with a native plugin (README.md).",
+  "scripts": {
+    "sync": "cap sync android",
+    "build": "powershell -ExecutionPolicy Bypass -File build-apk.ps1"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/core": "8.5.3",
+    "@capacitor/push-notifications": "8.1.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3"
+  }
+}

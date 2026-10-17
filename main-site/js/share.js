@@ -197,7 +197,9 @@ export function shareDeckChanged() {
 
 /* ---- hosting ---- */
 
-async function startHosting() {
+/* `ask`: from the Start button, so the Android app may ask for what sharing
+   with no wifi needs. Never when a reload resumes sharing on its own. */
+async function startHosting({ ask = false } = {}) {
   if (host) return;
 
   const stored = readSetting("hostCode");
@@ -243,7 +245,7 @@ async function startHosting() {
   changed();
 
   try {
-    await h.start(code);
+    await h.start(code, { ask });
   } catch {
     if (host !== h) return;
     stopHosting();
@@ -882,14 +884,34 @@ function showCode(code) {
     });
 }
 
+/* In the Android app: whether phones can join with no wifi, over Nearby
+   (js/nearby.js), and what to do if not. Nothing in a browser. */
+function nearbyText() {
+  switch (host?.nearby) {
+    case "ready":
+      return host.online
+        ? " Phones with the uwuFlash app can also join with no wifi."
+        : " No internet, so only phones with the uwuFlash app nearby can join.";
+    case "bt-off":
+      return " Turn on Bluetooth so phones with the uwuFlash app can join with no wifi.";
+    case "location-off":
+      return " Turn on location so phones with the uwuFlash app can join with no wifi.";
+    case "denied":
+    case "needs-permission":
+      return " To let phones join with no wifi, allow uwuFlash Nearby devices in Android's settings.";
+    default:
+      return "";
+  }
+}
+
 function statusText() {
   switch (status.status) {
     case "connecting":
       return "Starting...";
     case "waiting":
-      return shareMode() === "bigscreen"
+      return (shareMode() === "bigscreen"
         ? "Waiting for screens to join. Open the code on each of them."
-        : "Waiting for the other screen to join.";
+        : "Waiting for the other screen to join.") + nearbyText();
     case "connected":
       if (shareMode() === "bigscreen") {
         const n = onlineCount();
@@ -1244,7 +1266,7 @@ function wireSheet() {
 
   el.start.addEventListener("click", () => {
     status = { status: "idle" };
-    startHosting();
+    startHosting({ ask: true });
   });
 
   el.newCode.addEventListener("click", () => restartWithFreshCode({ tellGuest: true }));
@@ -1274,7 +1296,7 @@ function wireSheet() {
       changed();
     }
     closeModal("shareModal");
-    startViewing(code);
+    startViewing(code, { ask: true });
   });
 }
 

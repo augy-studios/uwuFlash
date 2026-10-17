@@ -7,14 +7,58 @@
    flex box can be hidden with it like anything else. */
 [hidden] { display: none !important; }
 
+/* ---- layering ----
+   content < edge tray (800) < update bar (900) < modals (1000) < presenter
+   (1100) < the other screen (1150) < toast (1200). */
+.modal-backdrop { z-index: 1000; }
+
+/* ---- safe areas ----
+   What the phone's status bar, notch and gesture bar cover. In the Android
+   app the page runs edge to edge, and Capacitor passes their sizes in as
+   --safe-area-inset-* (android/capacitor.config.json, SystemBars); a browser
+   has env() only. Everything here reads these, never env() directly. */
+:root {
+  --safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
+}
+/* The Android app hides the status bar (MainActivity.java), so the page starts
+   at the very top of the screen; the head script in index.html sets this. */
+:root[data-statusbar="hidden"] { --safe-top: 0px; }
+
+/* The page decides light or dark itself, so the browser is told which, and an
+   Android WebView in the phone's dark mode never darkens the page on its own
+   on top of it, which would turn the brand colours inside out. */
+:root[data-mode="light"] { color-scheme: light; }
+:root[data-mode="dark"] { color-scheme: dark; }
+
+/* No grey flash on tap in Android's WebView: every button here shows its own
+   pressed state. */
+button { -webkit-tap-highlight-color: transparent; }
+
+/* A modal never reaches under the status bar or the gesture bar. */
+.modal-backdrop {
+  padding-top: max(12px, var(--safe-top));
+  padding-right: max(12px, var(--safe-right));
+  padding-bottom: max(12px, var(--safe-bottom));
+  padding-left: max(12px, var(--safe-left));
+}
+
 /* ---- update bar ---- */
 
 /* Top of the document, above everything the app draws, and quieter than the
-   app's own topbar. One bar at a time: the app has no offline bar, so there
-   is no precedence order to keep here yet. */
+   page's own heading. Sticky, so the Edge Tray below it (which reads
+   --banner-h) stays put. One bar at a time: the site's new version first,
+   then the Android app's (js/update.js). */
 .update-notice {
+  position: sticky;
+  top: 0;
+  z-index: 900;
   background: color-mix(in srgb, var(--brand) 12%, var(--surface-strong));
   border-bottom: 1px solid var(--surface-border);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
   color: var(--ink);
   font-size: 0.875rem;
 }
@@ -27,7 +71,7 @@
   margin: 0 auto;
   padding: 0.5rem 1rem;
   /* Under the notch on a phone, where the bar is the topmost thing on screen. */
-  padding-top: max(0.5rem, env(safe-area-inset-top));
+  padding-top: max(0.5rem, var(--safe-top));
 }
 
 .update-notice p { flex: 1 1 auto; min-width: 0; }
@@ -48,48 +92,232 @@
   font-size: 0.88rem;
   transition: transform 0.15s ease, background 0.15s ease;
 }
-.btn:hover { transform: translateY(-1px); }
 .btn svg { width: 17px; height: 17px; }
 
 .btn-primary {
   background: var(--brand-fill);
   color: var(--on-brand);
 }
-.btn-primary:hover { background: var(--brand-fill-strong); }
 
 .btn-quiet {
   background: transparent;
   color: var(--muted-strong);
 }
-.btn-quiet:hover { background: var(--surface); }
+
+/* Only where there is a pointer that hovers: on a touch screen a hover style
+   sticks after the tap. */
+@media (hover: hover) {
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary:hover { background: var(--brand-fill-strong); }
+  .btn-quiet:hover { background: var(--surface); }
+}
 
 /* ---- layout ---- */
 
 .app {
   max-width: 720px;
   margin: 0 auto;
-  padding: 14px;
+  /* Clear of the notch and the gesture bar, where the page runs under them. */
+  padding: calc(14px + var(--safe-top)) max(14px, var(--safe-right)) max(28px, var(--safe-bottom)) max(14px, var(--safe-left));
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
 
-.topbar {
+/* ---- edge tray (edge-tray-spec.md, js/tray.js) ---- */
+
+:root {
+  --glass-btn: 44px;
+  --edge: max(16px, calc(var(--safe-right) + 16px));
+  --tray-top: max(calc(var(--banner-h, 0px) + 14px), calc(var(--safe-top) + 14px));
+  --tray-time: 0.34s;
+  --tray-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Fixed top right. Lets clicks through except on its children. */
+.hud-right {
+  position: fixed;
+  z-index: 800;
+  top: var(--tray-top);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  pointer-events: none;
+  transition: top 0.2s ease;
+}
+.hud-right > * { pointer-events: auto; }
+
+/* Out of the way while a card fills the screen, here or as the other screen. */
+body.presenting .hud-right,
+body.viewing .hud-right { display: none; }
+
+/* The tray: tab + column. Collapsed, the whole thing shifts right until only
+   the tab is left, flush with the edge. */
+.tray {
+  --tray-shift: calc(var(--glass-btn) + 8px + var(--edge));
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  transition: transform var(--tray-time) var(--tray-ease);
+}
+.tray.collapsed { transform: translateX(var(--tray-shift)); }
+
+.tray-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: var(--glass-btn);
+  padding: 0;
+  border-radius: 12px;
+  background: var(--surface);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border: 1px solid var(--surface-border);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-radius var(--tray-time) var(--tray-ease);
+}
+.tray-tab svg { width: 16px; height: 16px; transition: transform var(--tray-time) var(--tray-ease); }
+/* At the edge it is a tab: flat on the side the screen cuts off. */
+.tray.collapsed .tray-tab { border-radius: 12px 0 0 12px; border-right: none; }
+.tray.collapsed .tray-tab svg { transform: rotate(180deg); }
+
+.tray-buttons {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-right: var(--edge);
+}
+/* A short screen, such as a phone on its side with the app's buttons too,
+   scrolls the column rather than hiding its last buttons below the bottom.
+   Only there, as a scrolling box clips the buttons' shadows. */
+@media (max-height: 480px) {
+  .tray-buttons {
+    max-height: calc(100dvh - var(--tray-top) - 8px - var(--safe-bottom));
+    overflow-y: auto;
+    scrollbar-width: none;
+    padding: 2px 0 8px;
+  }
+}
+
+/* Separates the page's own actions from the global ones. */
+.tray-rule {
+  flex: none;
+  width: 24px;
+  height: 1px;
+  margin: 2px 0;
+  background: color-mix(in srgb, var(--ink) 25%, transparent);
+}
+
+.glass-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--glass-btn);
+  height: var(--glass-btn);
+  padding: 0;
+  border-radius: 14px;
+  background: var(--surface);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border: 1px solid var(--surface-border);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.glass-btn svg { width: 22px; height: 22px; }
+@media (hover: hover) {
+  .glass-btn:hover { transform: translateY(-1px); background: var(--surface-strong); }
+}
+
+/* The buttons unroll: each fades in, slides back from the edge and grows,
+   18 ms after the one above it. They move by `translate` and `scale`, leaving
+   `transform` to the hover lift. After .glass-btn, so it wins. */
+.tray-buttons > * {
+  transition:
+    opacity calc(var(--tray-time) * 0.8) ease,
+    translate var(--tray-time) var(--tray-ease),
+    scale var(--tray-time) var(--tray-ease),
+    transform 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+  /* Only opening is staggered: the delay comes from the state being entered. */
+  transition-delay: calc(var(--i, 0) * 18ms), calc(var(--i, 0) * 18ms), calc(var(--i, 0) * 18ms), 0s, 0s, 0s;
+}
+.tray-buttons > :nth-child(2) { --i: 1; }
+.tray-buttons > :nth-child(3) { --i: 2; }
+.tray-buttons > :nth-child(4) { --i: 3; }
+/* The Android app's bell and "Check for updates" (js/app-notify.js,
+   js/app-update.js) take the column to six. */
+.tray-buttons > :nth-child(5) { --i: 4; }
+.tray-buttons > :nth-child(6) { --i: 5; }
+.tray-buttons > :nth-child(7) { --i: 6; }
+.tray-buttons > :nth-child(8) { --i: 7; }
+.tray.collapsed .tray-buttons > * {
+  opacity: 0;
+  translate: 12px 0;
+  scale: 0.85;
+  transition-delay: 0s;
+}
+
+/* Sharing: the share button lit while it is on. */
+.glass-btn.live,
+.glass-btn.live:hover {
+  background: var(--brand-fill);
+  color: var(--on-brand);
+}
+
+.tray-tab:focus-visible,
+.glass-btn:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* No flash on load (spec 6.4): a stored collapse is painted collapsed from
+   the first frame, and tray.js removes this class a frame later. */
+.tray-start-collapsed .tray { transform: translateX(var(--tray-shift)); transition: none; }
+.tray-start-collapsed .tray-buttons > * { opacity: 0; translate: 12px 0; scale: 0.85; transition: none; }
+.tray-start-collapsed .app, .tray-start-collapsed .brand { transition: none; }
+.tray-start-collapsed .tray-tab { border-radius: 12px 0 0 12px; border-right: none; }
+.tray-start-collapsed .tray-tab svg { transform: rotate(180deg); }
+
+/* Keeping the page clear of the tray (spec 5.1): on a screen narrow enough
+   that the 720px column meets the tray, the column makes room while the tray
+   is open. Collapsed, only the brand line steps in, clear of the 24px tab by
+   10px less the column's own 14px of padding. */
+.app, .brand {
+  transition: padding-right var(--tray-time) var(--tray-ease),
+              padding-left var(--tray-time) var(--tray-ease);
+}
+@media (max-width: 920px) {
+  body.tray-open .app { padding-right: calc(var(--glass-btn) + var(--edge) + 12px); }
+  body:not(.tray-open) .brand { padding-right: calc(24px + 10px - 14px); }
+}
+
+/* The brand line: logo and name, nothing else, level with the tray's tab.
+   Not a link or a button. */
+.brand {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-height: var(--glass-btn);
 }
-.topbar h1 {
-  flex: 1 1 auto;
+.brand h1 {
   font-size: 1.35rem;
   color: var(--brand-ink);
 }
 
 /* The mark carries its own pale background rather than transparency, so it is
-   rounded to read as an app tile instead of a green square dropped into the
-   bar. The border keeps its edge defined in dark mode, where a pale tile would
-   otherwise float. */
-.topbar-logo {
+   rounded to read as an app tile instead of a green square dropped onto the
+   page. The border keeps its edge defined in dark mode, where a pale tile
+   would otherwise float. */
+.brand-logo {
   width: 34px;
   height: 34px;
   flex: none;
@@ -546,7 +774,7 @@
 .present {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: 1100;
   --card-bg: var(--brand);
   --card-ink: var(--on-brand);
   container-type: size;
@@ -587,8 +815,8 @@ body.presenting { overflow: hidden; }
 .present-exit {
   position: absolute;
   z-index: 3;
-  top: max(10px, env(safe-area-inset-top));
-  right: max(10px, env(safe-area-inset-right));
+  top: max(10px, var(--safe-top));
+  right: max(10px, var(--safe-right));
   width: 42px;
   height: 42px;
   border-radius: 14px;
@@ -600,22 +828,28 @@ body.presenting { overflow: hidden; }
   opacity: 0.55;
   transition: opacity 0.15s ease;
 }
-.present-exit:hover { opacity: 1; }
+@media (hover: hover) {
+  .present-exit:hover { opacity: 1; }
+}
 .present-exit svg { width: 20px; height: 20px; }
 
 /* Beside the exit button: switches the shown card's ticker. Lit while on. */
-.present-ticker { right: calc(max(10px, env(safe-area-inset-right)) + 52px); }
-.present-ticker[aria-pressed="true"] {
+.present-ticker { right: calc(max(10px, var(--safe-right)) + 52px); }
+.present-ticker[aria-pressed="true"],
+.present-flick[aria-pressed="true"] {
   color: var(--card-bg);
   background: var(--card-ink);
   opacity: 0.8;
 }
 .present-ticker:disabled { display: none; }
 
+/* Beside the ticker button, in the Android app only: flick to change cards. */
+.present-flick { right: calc(max(10px, var(--safe-right)) + 104px); }
+
 .present-count {
   position: absolute;
   z-index: 3;
-  bottom: max(10px, env(safe-area-inset-bottom));
+  bottom: max(10px, var(--safe-bottom));
   left: 0;
   right: 0;
   text-align: center;
@@ -644,7 +878,7 @@ body.presenting { overflow: hidden; }
   align-items: center;
   justify-content: center;
   gap: 10px;
-  padding: max(60px, env(safe-area-inset-top)) 16px max(44px, env(safe-area-inset-bottom));
+  padding: max(60px, var(--safe-top)) 16px max(44px, var(--safe-bottom));
 }
 .present.remote .present-remote { display: flex; }
 .present.remote #presentCanvas { display: none; }
@@ -733,11 +967,6 @@ body.presenting { overflow: hidden; }
 }
 
 /* ---- share sheet ---- */
-
-.icon-btn.live {
-  background: var(--brand-fill);
-  color: var(--on-brand);
-}
 
 .modal-note {
   font-size: 0.85rem;
@@ -1002,7 +1231,7 @@ body.presenting { overflow: hidden; }
 .viewer {
   position: fixed;
   inset: 0;
-  z-index: 65;
+  z-index: 1150;
   --card-bg: var(--brand);
   --card-ink: var(--on-brand);
   container-type: size;
@@ -1038,8 +1267,7 @@ body.viewing { overflow: hidden; }
   position: absolute;
   visibility: hidden;
   pointer-events: none;
-  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
-    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
 }
 .viewer:not(.showing):not(.lining) .viewer-wall { display: none; }
 .viewer.lining .viewer-panel { display: none; }
@@ -1120,8 +1348,8 @@ body.viewing { overflow: hidden; }
 .viewer-controls {
   position: absolute;
   z-index: 3;
-  top: max(10px, env(safe-area-inset-top));
-  right: max(10px, env(safe-area-inset-right));
+  top: max(10px, var(--safe-top));
+  right: max(10px, var(--safe-right));
   display: flex;
   gap: 8px;
 }
@@ -1144,7 +1372,7 @@ body.viewing { overflow: hidden; }
 .viewer-badge {
   position: absolute;
   z-index: 3;
-  bottom: max(12px, env(safe-area-inset-bottom));
+  bottom: max(12px, var(--safe-bottom));
   left: 50%;
   transform: translateX(-50%);
   padding: 6px 14px;
@@ -1159,9 +1387,9 @@ body.viewing { overflow: hidden; }
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(16px + env(safe-area-inset-bottom));
+  bottom: calc(16px + var(--safe-bottom));
   transform: translate(-50%, 12px);
-  z-index: 70;
+  z-index: 1200;
   padding: 10px 16px;
   border-radius: 999px;
   background: var(--brand-fill-strong);
@@ -1180,12 +1408,79 @@ body.viewing { overflow: hidden; }
   transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0s;
 }
 
+/* ---- notifications (Android app only, js/app-notify.js) ---- */
+
+.stack { display: flex; flex-direction: column; gap: 10px; }
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  cursor: pointer;
+}
+.toggle-row-text { display: flex; flex-direction: column; gap: 2px; font-size: 0.95rem; }
+.toggle-row-text small { font-size: 0.78rem; color: var(--muted-strong); line-height: 1.35; }
+
+.switch {
+  appearance: none;
+  -webkit-appearance: none;
+  flex-shrink: 0;
+  position: relative;
+  width: 44px;
+  height: 26px;
+  margin: 0;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--ink) 22%, transparent);
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface-strong);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: translate 0.18s ease;
+}
+.switch:checked { background: var(--brand-ink); }
+.switch:checked::after { translate: 18px 0; background: var(--bg); }
+.switch:disabled { opacity: 0.5; cursor: progress; }
+.switch:focus-visible {
+  outline: 2px solid var(--brand-ink);
+  outline-offset: 2px;
+}
+
 /* ---- narrow screens ---- */
 
 @media (max-width: 480px) {
-  .app { padding: 10px; }
+  :root {
+    --glass-btn: 40px;
+    --edge: max(10px, calc(var(--safe-right) + 10px));
+  }
+  .app {
+    padding: calc(10px + var(--safe-top)) max(10px, var(--safe-right)) max(24px, var(--safe-bottom)) max(10px, var(--safe-left));
+  }
+  /* The column's own padding is 10px here, so the brand line's step is too. */
+  body:not(.tray-open) .brand { padding-right: calc(24px + 10px - 10px); }
   .layout-picker { grid-template-columns: repeat(2, 1fr); }
   .card-chip-text { max-width: 90px; }
   .update-notice-inner { flex-wrap: wrap; }
   .update-notice p { flex: 1 0 100%; }
+}
+
+/* The tray toggles instantly with reduced motion; theme.css shortens the rest. */
+@media (prefers-reduced-motion: reduce) {
+  .hud-right, .tray, .tray-tab, .tray-tab svg, .tray-buttons > *, .glass-btn, .app, .brand {
+    transition-duration: 0.001ms !important;
+    transition-delay: 0s !important;
+  }
 }
