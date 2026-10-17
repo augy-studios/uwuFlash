@@ -13,6 +13,7 @@ sw.js               the service worker
 api/                Vercel functions, for the Android app only: its update check
                     (app-release.js) and "new version" notifications (push/release.js)
 package.json        only says api/ is ES modules; there is nothing to install
+.env.example        the variables api/ reads, which live in Vercel
 .well-known/        assetlinks.json, the Android app's signing key, so links open in it
 ```
 
