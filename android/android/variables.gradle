@@ -1,0 +1,11 @@
+ext {
+    minSdkVersion = 24
+    compileSdkVersion = 36
+    targetSdkVersion = 36
+    androidxAppCompatVersion = '1.7.1'
+    coreSplashScreenVersion = '1.2.0'
+    // Sharing phone to phone with no wifi or internet (NearbyShare).
+    playServicesNearbyVersion = '19.5.1'
+    // FlashPlugin's topic subscriptions (new versions, news) and MessagingService.
+    firebaseMessagingVersion = '25.0.1'
+}

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The update window on Android 12 and later: its buttons in the wallpaper's colour. -->
+<resources>
+    <style name="UpdateTheme" parent="@android:style/Theme.Material.Light.Dialog.NoActionBar">
+        <item name="android:colorAccent">@android:color/system_accent1_600</item>
+    </style>
+</resources>

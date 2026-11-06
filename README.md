@@ -81,8 +81,10 @@ card is your colour with near black text, and in dark mode it is near black
 with your colour as the text, which is what makes it readable across a room in
 either.
 
-**Use the Android app for more.** The same app, with what a web page cannot
-do: the screen at full brightness while a card is up, real full screen, the
+**Use the Android app for more.** The same app, built for Android, in your
+phone's own font and colours (Material You, which you can switch off for the
+look you know from the website), with what a web page cannot do: the screen at
+full brightness while a card is up, real full screen, the
 volume keys to change cards, a flick of the wrist to change them too, speaking
 a card's words instead of typing them, and sharing between phones with the app
 with no wifi or internet at all, over Bluetooth. It updates itself. Download
@@ -140,8 +142,8 @@ The app is in [`main-site/`](main-site/) and its own
 [README](main-site/README.md) covers the file layout and how to run it. There
 is no build step: static HTML, CSS and ES modules.
 
-The Android app is in [`android/`](android/): the site in Capacitor, with a
-native plugin for what a web page cannot do. Its
+The Android app is in [`android/`](android/): its own screens in Flutter, with
+the website as their spec, and native plugins for what a web page cannot do. Its
 [README](android/README.md) covers what it adds and how to build it, in one
 command, into [`release/`](release/).
 
@@ -155,7 +157,7 @@ across the uwuapps projects rather than written for this one:
 | `update-bar-spec.md` | The update prompt bar and the service worker rules it depends on. |
 | `STUN-p2p-spec.md` | Peer-to-peer pairing for screen sharing: STUN only, no TURN relay, no backend. |
 | `edge-tray-spec.md` | The Edge Tray: the column of buttons top right. |
-| `android-app-spec.md` | Wrapping the site in Capacitor as an Android app, and releasing it. |
+| `android-app-spec.md` | Wrapping a site in Capacitor as an Android app, and releasing it. uwuFlash 1.0.0 was built this way; from 1.1.0 the app is Flutter, and the spec's releasing and release notes sections (4.4, 4.5) still apply. |
 
 When one of these conflicts with the code, the specification is right and the
 code is a bug.

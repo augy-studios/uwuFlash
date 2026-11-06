@@ -1,0 +1,12 @@
+# Gradle's own, and what the flutter tool writes here (local.properties names the Flutter SDK on
+# this machine; GeneratedPluginRegistrant.java lists the Dart side's plugins).
+/.gradle
+/captures/
+/local.properties
+GeneratedPluginRegistrant.java
+.cxx/
+.externalNativeBuild
+*.iml
+.idea/
+build/
+*.hprof

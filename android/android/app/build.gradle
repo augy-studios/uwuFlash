@@ -1,0 +1,80 @@
+plugins {
+    id "com.android.application"
+    // Flutter's Gradle plugin, after Android's: the Dart side (android/lib/) and its plugins.
+    id "dev.flutter.flutter-gradle-plugin"
+}
+
+android {
+    namespace = "org.uwuapps.flash"
+    compileSdk = rootProject.ext.compileSdkVersion
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+
+    defaultConfig {
+        applicationId = "org.uwuapps.flash"
+        minSdk = rootProject.ext.minSdkVersion
+        targetSdk = rootProject.ext.targetSdkVersion
+        // From pubspec.yaml's version (1.1.0+2 is versionName 1.1.0, versionCode 2): raise it
+        // there for a new version.
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+    }
+
+    // Signed with the same key as every version before, from android/keystore.properties and
+    // android/android.keystore, which are kept out of git (android/README.md). Without them, a
+    // build for trying out is signed with the debug key, which build-apk.ps1 refuses.
+    def keystoreProps = new Properties()
+    def keystoreFile = rootProject.file('../keystore.properties')
+    if (keystoreFile.exists()) keystoreFile.withInputStream { keystoreProps.load(it) }
+    signingConfigs {
+        release {
+            if (keystoreProps.storeFile) {
+                storeFile = rootProject.file("../${keystoreProps.storeFile}")
+                storePassword = keystoreProps.storePassword
+                keyAlias = keystoreProps.keyAlias
+                keyPassword = keystoreProps.keyPassword
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled = false
+            shrinkResources = false
+            signingConfig = keystoreProps.storeFile ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+}
+
+// A release for phones' processors only: WebRTC's libraries bring x86 copies too, for emulators,
+// which would double the APK. Building for an emulator keeps them:
+// flutter build apk --android-project-arg=keepx86=true
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        if (!project.hasProperty("keepx86")) {
+            variant.packaging.jniLibs.excludes.add("lib/x86/**")
+            variant.packaging.jniLibs.excludes.add("lib/x86_64/**")
+        }
+    }
+}
+
+flutter {
+    source = "../.."
+}
+
+dependencies {
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation "com.google.android.gms:play-services-nearby:$playServicesNearbyVersion"
+    implementation "com.google.firebase:firebase-messaging:$firebaseMessagingVersion"
+}
+
+// Firebase is set up for this build: the server can push to it (android/FIREBASE-SETUP.md).
+// Without google-services.json the app builds and works, but gets no notifications.
+if (file('google-services.json').exists()) {
+    apply plugin: 'com.google.gms.google-services'
+} else {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

@@ -15,7 +15,19 @@ google-services.json
 *firebase-adminsdk*.json
 *-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].json
 
-node_modules/
+# Flutter's and Dart's: the packages fetched (pubspec.lock is kept), and everything built.
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+*.iml
+.idea/
+
+# The Playwright suite's packages and what it leaves behind (e2e/README.md).
+/e2e/node_modules/
+/e2e/test-results/
+/e2e/playwright-report/
 
 # Built apps. The release ones are copied to release/<version>/ at the project root, which is
 # committed.

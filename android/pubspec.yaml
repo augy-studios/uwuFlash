@@ -1,0 +1,43 @@
+# uwuFlash for Android: the app's own screens in Flutter, with its native parts (Java) reached
+# over a MethodChannel (README.md).
+name: uwuflash
+description: "uwuFlash for Android: your handheld signboard, natively in Flutter."
+publish_to: 'none'
+
+# The app's version: versionName+versionCode. Raise both for a new version: a phone only takes a
+# higher versionCode as an update. 1.0.0 (versionCode 1) was the Capacitor app; from 1.1.0 (2) it's
+# this Flutter one.
+version: 1.1.0+2
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  crypto: ^3.0.6
+  dynamic_color: ^2.1.0
+  file_selector: ^1.1.0
+  flutter:
+    sdk: flutter
+  flutter_svg: ^2.2.0
+  flutter_webrtc: ^1.6.3
+  http: ^1.6.0
+  image: ^4.12.0
+  material_color_utilities: ^0.13.0
+  qr_flutter: ^4.1.0
+  shared_preferences: ^2.5.6
+  web_socket_channel: ^3.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/logo.png
+  fonts:
+    # The site's font, for the UwU Apps theme. Material You uses the phone's own.
+    - family: Jua
+      fonts:
+        - asset: assets/fonts/Jua-Regular.ttf

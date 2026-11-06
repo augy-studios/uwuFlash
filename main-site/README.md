@@ -37,7 +37,9 @@ package.json        only says api/ is ES modules; there is nothing to install
 | `js/nearby.js` | Sharing with no wifi between phones with the app, which `p2p.js` uses beside PeerJS. |
 
 Everything with `app-` in its name, and `screen.js` and `nearby.js`, does
-nothing in a browser or the PWA: each asks `AppBridge.has()` first. See
+nothing in a browser or the PWA: each asks `AppBridge.has()` first. They're
+for phones still on the Android app's 1.0.0, which runs this site in a
+WebView; from 1.1.0 the app is Flutter and doesn't load this page. See
 `android/README.md`.
 
 The dependency direction is one way: `app.js` imports everything, `deck.js`

@@ -1,8 +1,8 @@
 # Setting up Firebase for the Android app's notifications
 
-The Android app shows the site in its own WebView, which has no Web Push. So its notifications
-come through **Firebase Cloud Messaging (FCM)**, Google's push service for Android. There are
-two kinds, and people turn each on with the bell in the Edge Tray:
+Web Push is a browser's, and the Android app isn't one. So its notifications come through
+**Firebase Cloud Messaging (FCM)**, Google's push service for Android. There are two kinds, and
+people turn each on with the bell in the Edge Tray:
 
 | Notification | Sent by | FCM topic |
 |---|---|---|
@@ -22,7 +22,7 @@ It takes about 20 minutes, and covers four things:
 
 | What | Where it goes | Secret? |
 |---|---|---|
-| `google-services.json`, which tells the app which Firebase project it belongs to | `android/native/app/` | No, but kept out of git anyway |
+| `google-services.json`, which tells the app which Firebase project it belongs to | `android/android/app/` | No, but kept out of git anyway |
 | uwuFlash's service account key (`….json`), which lets this site's server send pushes | Vercel, as `FIREBASE_SERVICE_ACCOUNT` | **Yes.** Anyone with it can push to phones with any app in the UwU Apps project |
 | A webhook secret, which proves a "release published" call really came from GitHub | GitHub and Vercel, as `GITHUB_WEBHOOK_SECRET` | **Yes** |
 | A GitHub token (optional), which raises GitHub's rate limit for the update check | Vercel, as `GITHUB_TOKEN` | Yes, though it can do nothing but read |
@@ -40,7 +40,7 @@ nothing is ever sent; without the third, news still arrives, but not new version
    doesn't need it.
 5. Click **Register app**.
 6. Click **Download google-services.json**. Save it as
-   `android\native\app\google-services.json` in this project, beside `build.gradle`.
+   `android\android\app\google-services.json` in this project, beside `build.gradle`.
 7. Click **Next** through the remaining steps without changing anything. The project already
    has what they describe: the build applies the Google services plugin whenever the file is
    there.
@@ -52,7 +52,7 @@ found for package name".
 Check it's kept out of git before going on. From the project root:
 
 ```powershell
-git check-ignore -v android\native\app\google-services.json
+git check-ignore -v android\android\app\google-services.json
 ```
 
 It should print the line of `android/.gitignore` that ignores it.
@@ -164,7 +164,7 @@ Sending news later works the same way as step 2: **Topic** `uwuflash-news`, chan
 | What happens | What to do |
 |---|---|
 | The build stops with `No matching client found for package name 'org.uwuapps.flash'` | `google-services.json` was downloaded before uwuFlash was added. Download it again from **Project settings** > **Your apps** > **uwuFlash**. |
-| No bell in the Edge Tray | The APK was built without `google-services.json`. Check it's at `android\native\app\google-services.json`, then build again and reinstall. |
+| No bell in the Edge Tray | The APK was built without `google-services.json`. Check it's at `android\android\app\google-services.json`, then build again and reinstall. |
 | "Notifications are off for uwuFlash in Android's settings" | You said no to Android's prompt. Tap **Open Android's settings** under the switches, turn notifications on, and come back. |
 | "Couldn't reach Firebase" when turning a switch on | The phone was offline, or has no Google Play services (some Huawei phones), which FCM needs. |
 | The webhook shows `401 Bad signature` | The secret in GitHub and `GITHUB_WEBHOOK_SECRET` in Vercel differ, or Vercel wasn't redeployed after adding it. |

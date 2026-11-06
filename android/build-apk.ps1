@@ -2,26 +2,28 @@
 #
 #     powershell -ExecutionPolicy Bypass -File android\build-apk.ps1
 #
-# Installs the Capacitor packages if they're missing, syncs them into the Android project
-# (native/), then Gradle builds the release APK, signed with android.keystore using the
-# passwords in keystore.properties (native/app/build.gradle), and the signature is checked
-# against main-site/.well-known/assetlinks.json before it's copied out as
-# release/<versionName>/uwuflash-<versionName>.apk.
+# From 1.1.0 the app is Flutter (lib/, android/): `flutter build apk` builds it for ARM phones (32
+# and 64 bit, one APK, as the app's updater fetches the one file), signed with android.keystore
+# using the passwords in keystore.properties (android/app/build.gradle), and the signature is
+# checked against main-site/.well-known/assetlinks.json before it's copied out as
+# release/<version>/uwuflash-<version>.apk. The version is pubspec.yaml's.
 #
-# The first time, with no signing key yet, it makes one (android.keystore, keystore.properties)
-# and writes its fingerprint into assetlinks.json. Both files are kept out of git: back them up.
-# Once assetlinks.json names a key, a missing keystore is an error, never a new key, as a
-# different key can't update the app already on phones.
+# The signing key was made by the first build of 1.0.0 and is kept out of git: back it up. A missing
+# keystore is an error, never a new key, as a different key can't update the app already on phones.
 #
-# Needs a JDK 21 or later and the Android SDK. It finds them in JAVA_HOME and ANDROID_HOME if
-# they're set, or else the newest JDK under Program Files and the SDK in ~/.bubblewrap or
-# %LOCALAPPDATA%\Android\Sdk. Gradle fetches any SDK platform it's missing on the first build.
+# Needs Flutter (on the PATH, in FLUTTER_ROOT or in ~\flutter), a JDK 21 or later and the Android
+# SDK. It finds them in JAVA_HOME and ANDROID_HOME if they're set, or else the newest JDK under
+# Program Files and the SDK in ~/.bubblewrap or %LOCALAPPDATA%\Android\Sdk.
 
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $root = Split-Path $here -Parent
 $package = 'org.uwuapps.flash'
 $assetLinks = "$root\main-site\.well-known\assetlinks.json"
+
+if (-not (Test-Path "$here\keystore.properties") -or -not (Test-Path "$here\android.keystore")) {
+    throw "android.keystore and keystore.properties are missing from $here. They're not in git: restore them from your backup. A new key couldn't update the app already installed on phones."
+}
 
 function Find-Jdk {
     if ($env:JAVA_HOME -and (Test-Path "$env:JAVA_HOME\bin\java.exe")) {
@@ -37,88 +39,21 @@ function Find-Jdk {
     throw 'No JDK 21 or later found. Install one (https://adoptium.net) or set JAVA_HOME to it.'
 }
 
-# A native tool's output, stderr and all, with only its exit code deciding success: Windows
-# PowerShell turns anything a program writes to stderr into an error otherwise.
-function Invoke-Tool([string]$exe, [string[]]$arguments) {
-    $ErrorActionPreference = 'Continue'
-    $out = & $exe @arguments 2>&1 | Out-String
-    return @{ Ok = ($LASTEXITCODE -eq 0); Output = $out }
-}
-
-# The fingerprint the UwU Apps site template ships in assetlinks.json (org.uwuapps.template's).
-# It isn't this app's key, so it counts as no key at all, and the first build replaces it.
-$templateFingerprint = 'e4eb13b6ca2a9e89e48b3cab682bbf6a999709a52a9a36208c8ca9949b08cb51'
-
-# The SHA-256 fingerprint assetlinks.json lists for this app, as 64 lowercase hex digits, or $null.
+# The SHA-256 fingerprint assetlinks.json lists for this app, as 64 lowercase hex digits. The key
+# every version before was signed with, or phones can't update to this one and the site's links
+# won't open in it.
 function Get-LinkedFingerprint {
-    if (-not (Test-Path $assetLinks)) { return $null }
     $text = Get-Content $assetLinks -Raw
-    if ($text -notmatch [regex]::Escape($package)) { return $null }
+    if ($text -notmatch [regex]::Escape($package)) { throw "assetlinks.json doesn't list $package's key. Restore it from git." }
     $m = [regex]::Match($text, '([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){31})')
-    if (-not $m.Success) { return $null }
-    $fp = $m.Groups[1].Value.Replace(':', '').ToLowerInvariant()
-    if ($fp -eq $templateFingerprint) { return $null }
-    return $fp
-}
-
-$env:JAVA_HOME = Find-Jdk
-$env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
-$keytool = "$env:JAVA_HOME\bin\keytool.exe"
-
-# ---------- the signing key ----------
-
-if (-not (Test-Path "$here\keystore.properties") -or -not (Test-Path "$here\android.keystore")) {
-    if (Get-LinkedFingerprint) {
-        throw "android.keystore and keystore.properties are missing from $here, and assetlinks.json already names this app's key. They're not in git: restore them from your backup. A new key couldn't update the app already installed on phones."
-    }
-    if ((Test-Path "$here\keystore.properties") -or (Test-Path "$here\android.keystore")) {
-        throw "Only one of android.keystore and keystore.properties is in $here. Restore the other from your backup, or delete both to make a new key."
-    }
-
-    Write-Host 'No signing key yet: making one (android.keystore, keystore.properties)...'
-    $bytes = New-Object byte[] 24
-    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-    $password = ([Convert]::ToBase64String($bytes) -replace '[^A-Za-z0-9]', '')
-    $made = Invoke-Tool $keytool @('-genkeypair', '-keystore', "$here\android.keystore", '-storetype', 'PKCS12',
-        '-alias', 'uwuflash', '-keyalg', 'RSA', '-keysize', '4096', '-validity', '36500',
-        '-storepass', $password, '-keypass', $password, '-dname', 'CN=uwuFlash, O=UwU Apps')
-    if (-not $made.Ok) { Write-Host $made.Output; throw 'keytool could not make the signing key.' }
-    Set-Content -Path "$here\keystore.properties" -Encoding ASCII -Value @(
-        '# The signing key''s passwords (android/README.md). Never in git: back this up with android.keystore.',
-        'storeFile=android.keystore',
-        "storePassword=$password",
-        'keyAlias=uwuflash',
-        "keyPassword=$password"
-    )
-
-    $listed = Invoke-Tool $keytool @('-list', '-v', '-keystore', "$here\android.keystore", '-alias', 'uwuflash', '-storepass', $password)
-    $fp = [regex]::Match($listed.Output, 'SHA256:\s*([0-9A-F:]{95})').Groups[1].Value
-    if (-not $fp) { Write-Host $listed.Output; throw 'Could not read the new key''s SHA-256 fingerprint.' }
-    # Written whole: this app is the only one the site links to.
-    Set-Content -Path $assetLinks -Encoding ASCII -Value @(
-        '[{',
-        '    "relation": ["delegate_permission/common.handle_all_urls"],',
-        '    "target": {',
-        '        "namespace": "android_app",',
-        "        `"package_name`": `"$package`",",
-        "        `"sha256_cert_fingerprints`": [`"$fp`"]",
-        '    }',
-        '}]'
-    )
-    Write-Host ''
-    Write-Host 'Made a new signing key. Before anything else:' -ForegroundColor Yellow
-    Write-Host "  1. Back up android\android.keystore and android\keystore.properties somewhere safe." -ForegroundColor Yellow
-    Write-Host '     Lose them and no phone can ever update this app again.' -ForegroundColor Yellow
-    Write-Host "  2. Commit and deploy main-site\.well-known\assetlinks.json (fingerprint $fp)," -ForegroundColor Yellow
-    Write-Host '     so the site''s links open in the app.' -ForegroundColor Yellow
-    Write-Host ''
+    if (-not $m.Success) { throw "assetlinks.json has no fingerprint for $package. Restore it from git." }
+    return $m.Groups[1].Value.Replace(':', '').ToLowerInvariant()
 }
 
 $expected = Get-LinkedFingerprint
-if (-not $expected) { throw "assetlinks.json doesn't list $package's key. Restore it from git." }
 
-# ---------- the Android SDK ----------
-
+$env:JAVA_HOME = Find-Jdk
+$env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
 if (-not $env:ANDROID_HOME) {
     $bw = "$env:USERPROFILE\.bubblewrap\config.json"
     if (Test-Path $bw) { $env:ANDROID_HOME = (Get-Content $bw -Raw | ConvertFrom-Json).androidSdkPath }
@@ -128,11 +63,16 @@ if (-not $env:ANDROID_HOME) {
 $buildTools = Get-ChildItem "$env:ANDROID_HOME\build-tools" -Directory | Sort-Object { [version]$_.Name } | Select-Object -Last 1
 if (-not $buildTools) { throw "No build-tools in $env:ANDROID_HOME. Install them with Android Studio's SDK Manager." }
 
-$gradleFile = Get-Content "$here\native\app\build.gradle" -Raw
-$version = [regex]::Match($gradleFile, 'versionName "([^"]+)"').Groups[1].Value
-$versionCode = [regex]::Match($gradleFile, 'versionCode (\d+)').Groups[1].Value
+$flutter = if ($env:FLUTTER_ROOT) { "$env:FLUTTER_ROOT\bin\flutter.bat" }
+    elseif (Get-Command flutter -ErrorAction SilentlyContinue) { 'flutter' }
+    elseif (Test-Path "$env:USERPROFILE\flutter\bin\flutter.bat") { "$env:USERPROFILE\flutter\bin\flutter.bat" }
+    else { throw 'Flutter not found. Put it on the PATH, or set FLUTTER_ROOT to it.' }
+
+$pubspec = Get-Content "$here\pubspec.yaml" -Raw
+$version = [regex]::Match($pubspec, '(?m)^version:\s*([0-9.]+)').Groups[1].Value
+$versionCode = [regex]::Match($pubspec, '(?m)^version:\s*[0-9.]+\+(\d+)').Groups[1].Value
 Write-Host "Building uwuFlash $version (versionCode $versionCode) for Android (JDK: $env:JAVA_HOME)..."
-if (Test-Path "$here\native\app\google-services.json") {
+if (Test-Path "$here\android\app\google-services.json") {
     Write-Host 'Firebase: google-services.json found, notifications included.'
 } else {
     Write-Host 'Firebase: no google-services.json, so this build has no notifications (android\FIREBASE-SETUP.md).' -ForegroundColor Yellow
@@ -140,37 +80,31 @@ if (Test-Path "$here\native\app\google-services.json") {
 
 $dest = "$root\release\$version\uwuflash-$version.apk"
 if (Test-Path $dest) {
-    Write-Host "release\$version already has an APK, which this replaces. For a new version, raise versionName and versionCode in android\native\app\build.gradle first, or phones won't take it as an update." -ForegroundColor Yellow
+    Write-Host "release\$version already has an APK, which this replaces. For a new version, raise the version in android\pubspec.yaml first, or phones won't take it as an update." -ForegroundColor Yellow
 }
-
-# ---------- build ----------
 
 Push-Location $here
 try {
-    if (-not (Test-Path "$here\node_modules\@capacitor\android")) {
-        & npm ci
-        if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
-    }
-    & npx cap sync android
-    if ($LASTEXITCODE -ne 0) { throw 'cap sync failed.' }
+    & $flutter pub get
+    if ($LASTEXITCODE -ne 0) { throw 'flutter pub get failed.' }
+    & $flutter build apk --release --target-platform android-arm,android-arm64
+    if ($LASTEXITCODE -ne 0) { throw 'flutter build apk failed. Its messages are above.' }
 } finally {
     Pop-Location
 }
 
-$gradle = Start-Process -FilePath "$here\native\gradlew.bat" -ArgumentList 'assembleRelease', '--no-daemon', '-q' `
-    -WorkingDirectory "$here\native" -NoNewWindow -Wait -PassThru
-if ($gradle.ExitCode -ne 0) { throw "Gradle failed (exit $($gradle.ExitCode)). Its messages are above." }
-
-$signed = "$here\native\app\build\outputs\apk\release\app-release.apk"
+$signed = "$here\build\app\outputs\flutter-apk\app-release.apk"
 if (-not (Test-Path $signed)) { throw "Gradle made no signed APK: is keystore.properties's storeFile right?" }
 
-# Its warnings (META-INF/*.version "not protected by signature") come with every Android build
-# and mean nothing here; only a failure matters.
-$check = Invoke-Tool "$($buildTools.FullName)\apksigner.bat" @('verify', '--print-certs', $signed)
-if (-not $check.Ok) { Write-Host $check.Output; throw 'The signed app failed its signature check.' }
-# The key assetlinks.json names, which is the key every version before was signed with, or
-# phones can't update to it and the site's links won't open in it.
-$sha = [regex]::Match($check.Output, 'SHA-256 digest: ([0-9a-f]{64})').Groups[1].Value
+# Its warnings (META-INF/*.version "not protected by signature") come with every Android build and
+# mean nothing here; only a failure matters. Windows PowerShell turns anything a program writes to
+# stderr into an error, so only its exit code is looked at.
+$ErrorActionPreference = 'Continue'
+$check = & "$($buildTools.FullName)\apksigner.bat" verify --print-certs $signed 2>&1 | Out-String
+$verified = $LASTEXITCODE -eq 0
+$ErrorActionPreference = 'Stop'
+if (-not $verified) { Write-Host $check; throw 'The signed app failed its signature check.' }
+$sha = [regex]::Match($check, 'SHA-256 digest: ([0-9a-f]{64})').Groups[1].Value
 if ($sha -ne $expected) {
     throw "The APK is signed with a different key ($sha) from the one assetlinks.json names ($expected), so it can't update the app already installed."
 }
@@ -178,4 +112,5 @@ if ($sha -ne $expected) {
 # Each version in a folder of its own.
 New-Item -ItemType Directory -Force "$root\release\$version" | Out-Null
 Copy-Item $signed $dest -Force
-Write-Host "Done: $dest" -ForegroundColor Green
+$size = [math]::Round((Get-Item $dest).Length / 1MB, 1)
+Write-Host "Done: $dest ($size MB)" -ForegroundColor Green
