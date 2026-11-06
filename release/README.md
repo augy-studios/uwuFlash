@@ -3,8 +3,8 @@
 The Android app, each version in a folder of its own:
 
 ```text
-release/1.1.0/
-  uwuflash-1.1.0.apk      Android     android\build-apk.ps1
+release/1.1.1/
+  uwuflash-1.1.1.apk      Android     android\build-apk.ps1
 ```
 
 The APKs are committed alongside the code they were built from. The signing
@@ -37,8 +37,10 @@ It puts the APK in `release\<version>\uwuflash-<version>.apk`, the version taken
    `android-v<version>`: it's how the app's updater finds its releases.
 5. **Release title**: `uwuFlash 1.0.0`.
 6. **Describe this release**: the release notes, from `announcement/release-notes-<version>.md`,
-   written as `android-app-spec.md` (section 4.5) describes, for the people installing it. Once
-   it's out, post `announcement/announcement-<version>.md` to the app's channels.
+   written as `android-app-spec.md` (section 4.5) describes, for the people installing it. The
+   app's updater shows them as its changelog: the first paragraph as the summary, and under
+   `## What's new` each `###` heading as a card of its `- **Title**: text` items, so keep to that
+   shape. Once it's out, post `announcement/announcement-<version>.md` to the app's channels.
 7. Drag in the APK from `release\<version>\` to the box that says **Attach binaries by
    dropping them here or selecting them**. Wait for it to finish uploading.
 8. Tick **Set as the latest release**, then **Publish release**.

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only, never a release: lets adb open the updater, to see each of its steps on an
+     emulator (android/README.md, "The updater's page"). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application>
+        <activity android:name=".UpdateActivity"
+            android:exported="true"
+            tools:replace="android:exported" />
+    </application>
+</manifest>

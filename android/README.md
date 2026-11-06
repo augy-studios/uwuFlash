@@ -56,7 +56,7 @@ snapshot). The website can't work them out, so it wears the brand colour instead
 | **Flick to change cards** while presenting: a sharp turn of the wrist to the right for the next card, to the left for the one before. Off until switched on with its button in the presenter, and remembered. Phones with a gyroscope only | `Flick`, `FlashPlugin.flick` | `lib/app/state.dart` (`togglePresentFlick`) |
 | **Speak a card**: a **Speak** button under a text layer's text box opens Android's speech screen, and what you say goes onto the card on a line of its own. No microphone permission: the speech screen has its own | `FlashPlugin.listen` | `lib/screens/editor.dart` |
 | **Sharing with no wifi or internet**: phones that both have the app share over Google's Nearby Connections (Bluetooth to find each other, then direct wifi between them), alongside the usual same-wifi sharing. Mirror, Extend, Big Screen and Send cards all work this way, and a phone joins whichever way connects first. Needs Google Play services on every phone | `NearbyShare`, `FlashPlugin.nearby*` | `lib/share/nearby.dart`, `p2p.dart` |
-| **Updating itself** from GitHub Releases: a bar at the top of the app when a new version is out, and the Edge Tray's download button, **Check for updates**. Both use Android's own installer | `UpdateActivity` | `lib/screens/update_bar.dart`, `main-site/api/app-release.js` |
+| **Updating itself** from GitHub Releases: a bar at the top of the app when a new version is out, and the Edge Tray's download button, **Check for updates**. Both open the updater's page, with a changelog from the release notes, and use Android's own installer | `UpdateActivity` | `lib/screens/update_bar.dart`, `main-site/api/app-release.js` |
 | **Notifications**, opt-in from the bell in the Edge Tray: new versions of the app (pushed the moment a release is published), and news you send from the Firebase console | `FlashPlugin.setTopic` (FCM topics), `Notifications`, `MessagingService` | `lib/screens/sheets.dart`, `main-site/api/push/release.js`, `api/_lib/fcm.js` |
 | **The site's own links** (`https://flash.uwuapps.org/...`, verified by `.well-known/assetlinks.json`), so scanning a share code's QR code with the phone's camera joins in the app. Also `uwu://flash/` links, such as `uwu://flash/?join=BCD234` | `MainActivity`, `FlashPlugin.open` | `lib/app/app.dart` (`openLink`) |
 | **Bringing 1.0.0's cards across**, once: a hidden WebView, never shown and the only one left, reads the site's `localStorage` and pictures with nothing fetched. The WebView's copy is left as it was, and if a picture the deck uses doesn't come, the next two launches try again | `MigratePlugin` | `lib/data/migrate.dart` |
@@ -217,8 +217,34 @@ On a phone with the app installed:
 - **Share as usual**: with wifi, share to a laptop's browser. It works as it does on the website.
 - **Links**: scan a share code's QR code with the phone's camera. It joins in the app, not the
   browser. If it opens the browser, `assetlinks.json` isn't deployed with this key yet.
-- **Updates**: the Edge Tray's circled download arrow says you have the newest version.
+- **Updates**: the Edge Tray's circled download arrow opens the updater's page: you're up to date,
+  with the changelog under it.
 - **Notifications** (with Firebase set up): see `FIREBASE-SETUP.md`, step 7.
+
+### The updater's page
+
+`UpdateActivity` is the one screen that isn't Flutter, in Material 3 (Material Components,
+`materialVersion` in `android/variables.gradle`): `UpdateTheme` in `res/values/update.xml` takes its
+colours from the wallpaper on Android 12 and later (`DynamicColors`), and before that from the tonal
+palette of the app's green, light and dark (`values-night/update.xml`), in either of the app's
+themes. Its icons are `update_ic_*.xml`. The changelog is `main-site/api/app-release.js`'s `history`:
+each release's notes on GitHub, its "## What's new" read into groups by their "###" headings. Material's
+progress bar has no wave for views, so `WavyProgressView` draws Material 3 Expressive's.
+
+To see each step on an emulator, a debug build (`flutter build apk --debug`, never a release; it's the
+only build where adb can open this page, `src/debug/AndroidManifest.xml`) takes two extras:
+`org.uwuapps.flash.update.TEST_JSON`, a file in the app's cache to read in place of
+`/api/app-release`, and `org.uwuapps.flash.update.TEST_VERSION`, a version to be. For example, as
+1.0.0 with the newest release out, its JSON saved from the site:
+
+```bash
+adb push release.json /data/local/tmp/
+adb shell "run-as org.uwuapps.flash cp /data/local/tmp/release.json cache/"
+adb shell am start -n org.uwuapps.flash/.UpdateActivity --ez org.uwuapps.flash.update.CHECK true --es org.uwuapps.flash.update.TEST_JSON release.json --es org.uwuapps.flash.update.TEST_VERSION 1.0.0
+```
+
+`adb shell cmd uimode night yes` shows it dark. Update downloads that release's real APK, which then
+isn't installed if it isn't newer than the build you're running.
 
 ## Changing it
 
